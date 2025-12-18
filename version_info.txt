@@ -1,0 +1,32 @@
+# UTF-8
+#
+# For more details about fixed file info 'ffi' see:
+# http://msdn.microsoft.com/en-us/library/ms646997.aspx
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 14, 103),
+    prodvers=(1, 0, 14, 103),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904b0',
+        [StringStruct(u'CompanyName', u'EvKyz'),
+        StringStruct(u'FileDescription', u'Настройка интерфейса Windows'),
+        StringStruct(u'FileVersion', u'1.0.14.103'),
+        StringStruct(u'InternalName', u'interfacemaster.exe'),
+        StringStruct(u'LegalCopyright', u'EvKyz'),
+        StringStruct(u'OriginalFilename', u'InterfaceMaster'),
+        StringStruct(u'ProductName', u'Interface Master'),
+        StringStruct(u'ProductVersion', u'1.0.14.103')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)

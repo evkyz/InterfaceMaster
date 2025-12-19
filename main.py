@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 import platform
 from PIL import Image, ImageTk
 
+
 def calculate_sha1(filepath):
     """Вычисляет SHA-1 хеш файла"""
     try:
@@ -19,6 +20,7 @@ def calculate_sha1(filepath):
         return sha1_hash.hexdigest().upper()
     except Exception:
         return None
+
 
 def check_windows_version():
     """Проверяет версию Windows"""
@@ -46,6 +48,7 @@ def check_windows_version():
             return False, f"Windows (неизвестная версия: {version})"
     except (ValueError, IndexError):
         return False, f"Windows (ошибка определения версии: {version})"
+
 
 def show_warning_message():
     """Показывает предупреждение о системе"""
@@ -96,28 +99,29 @@ class DLLChecker:
             system32_path = r"C:\Windows\System32\imaster.dll"
 
             import ctypes
-            if not ctypes.windll.shell32.IsUserAnAdmin():
-                return False, "Требуются права администратора"
+            # Убрано сообщение о правах администратора
 
             if os.path.exists(system32_path):
                 existing_hash = calculate_sha1(system32_path)
                 source_hash = calculate_sha1(dll_path)
 
                 if existing_hash == source_hash:
-                    return True, "Файл уже существует в System32 с тем же хешем"
+                    # Убрано сообщение о том, что файл уже существует с тем же хешем
+                    return True, None  # Возвращаем None вместо сообщения
                 else:
                     root = tk.Tk()
                     root.withdraw()
 
                     response = messagebox.askyesno(
                         "Перезапись файла",
-                        "Файл imaster.dll уже существует в System32 с другим хешем.\n"
+                        "Файл imaster.dll уже существует в System32 с другим хешем\n"
                         "Хотите перезаписать его?"
                     )
                     root.destroy()
 
                     if not response:
-                        return False, "Пользователь отказался от перезаписи"
+                        # Убрано сообщение об отказе от перезаписи
+                        return False, None
 
             shutil.copy2(dll_path, system32_path)
 
@@ -128,7 +132,8 @@ class DLLChecker:
                 return False, "Не удалось скопировать файл"
 
         except PermissionError:
-            return False, "Отказано в доступе. Запустите программу от имени администратора"
+            # Убрано сообщение о правах доступа
+            return False, "Отказано в доступе"
         except Exception as e:
             return False, f"Ошибка при копировании: {str(e)}"
 
@@ -286,13 +291,17 @@ class DLLChecker:
             success, message = DLLChecker.copy_dll_to_system32(dll_status['dll_path'])
 
             if success:
-                messagebox.showinfo("Успех", message)
+                # Показываем сообщение об успехе только если оно есть
+                if message:
+                    messagebox.showinfo("Успех", message)
                 DLLChecker.initialize()
                 return dll_status['system32_path']
             else:
-                messagebox.showwarning("Предупреждение",
-                                       f"Не удалось скопировать файл:\n{message}\n\n"
-                                       f"Будет использовано текущее расположение.")
+                # Показываем предупреждение только если есть сообщение об ошибке
+                if message:
+                    messagebox.showwarning("Предупреждение",
+                                           f"Не удалось скопировать файл:\n{message}\n\n"
+                                           f"Будет использовано текущее расположение")
                 return dll_status['dll_path']
         else:
             return dll_status['dll_path']
@@ -342,6 +351,7 @@ class DLLChecker:
             return dll_status['system32_path']
 
         return dll_status['recommended_path']
+
 
 class InterfaceMaster:
     """Основной класс приложения"""
@@ -557,7 +567,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "1.0.14.103 beta"
+        self.version = "1.0.14.105"
 
         self.logo_image = None
         self.logo_photo = None
@@ -838,6 +848,7 @@ class InterfaceMaster:
 
     def open_explorer(self):
         self.open_module("explorer")
+
 
 def main():
     """Основная функция запуска приложения"""

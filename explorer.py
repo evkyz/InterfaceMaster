@@ -249,46 +249,42 @@ class ExplorerModule:
         """Применяет выбранные изменения для папок в реестре"""
         base_key = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace"
 
-        try:
-            for guid, var in self.checkbox_vars.items():
-                current_state = var.get()
-                reg_path = f"{base_key}\\{guid}"
-                folder_name = self.folders[guid][0]
+        # Просто применяем изменения без дополнительных сообщений
+        for guid, var in self.checkbox_vars.items():
+            current_state = var.get()
+            reg_path = f"{base_key}\\{guid}"
 
-                try:
-                    check_result = subprocess.run(
-                        ['reg', 'query', reg_path],
+            try:
+                check_result = subprocess.run(
+                    ['reg', 'query', reg_path],
+                    capture_output=True,
+                    text=True,
+                    encoding='cp866',
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+
+                key_exists = check_result.returncode == 0
+
+                if not current_state and key_exists:
+                    subprocess.run(
+                        ['reg', 'delete', reg_path, '/f'],
                         capture_output=True,
                         text=True,
                         encoding='cp866',
                         creationflags=subprocess.CREATE_NO_WINDOW
                     )
 
-                    key_exists = check_result.returncode == 0
+                elif current_state and not key_exists:
+                    subprocess.run(
+                        ['reg', 'add', reg_path, '/f'],
+                        capture_output=True,
+                        text=True,
+                        encoding='cp866',
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
 
-                    if not current_state and key_exists:
-                        subprocess.run(
-                            ['reg', 'delete', reg_path, '/f'],
-                            capture_output=True,
-                            text=True,
-                            encoding='cp866',
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-
-                    elif current_state and not key_exists:
-                        subprocess.run(
-                            ['reg', 'add', reg_path, '/f'],
-                            capture_output=True,
-                            text=True,
-                            encoding='cp866',
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-
-                except Exception:
-                    pass
-
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     def toggle_bitlocker(self):
         """Переключает состояние BitLocker"""

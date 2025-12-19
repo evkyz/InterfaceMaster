@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox
 
 try:
     from main import DLLChecker
+
     HAS_DLL_CHECKER = True
 except ImportError:
     HAS_DLL_CHECKER = False
@@ -82,11 +83,10 @@ class Module:
 
     def get_dll_path(self):
         if not HAS_DLL_CHECKER:
-            messagebox.showwarning("Внимание", "Ошибка загрузки модуля проверки DLL!")
+            # Не показываем сообщение - в main уже есть проверка
             return None
 
         dll_path = DLLChecker.get_dll_path_for_module(self.parent, self.module_name)
-
         return dll_path
 
     def show_message(self, message, message_type="info"):
@@ -214,79 +214,64 @@ class Module:
                 self.icon_combobox.current(0)
 
     def apply_icon(self):
+        # Проверка DLL уже сделана при загрузке, кнопка будет отключена если нет DLL
         if not self.dll_path:
-            messagebox.showerror("Ошибка", "Внимание! DLL файл не найден!")
             return
 
         selected_disk = self.disk_var.get()
-        if not selected_disk:
-            messagebox.showwarning("Ошибка", "Выберите диск.")
-            return
-
-        selected_disk = selected_disk.strip(":\\/").upper()
-        if not selected_disk:
-            messagebox.showwarning("Ошибка", "Неверный формат диска.")
-            return
-
         selected_package = self.package_var.get()
         selected_icon = self.icon_var.get()
-        if not selected_package or not selected_icon:
-            messagebox.showwarning("Ошибка", "Выберите пакет и иконку.")
-            return
 
-        icon_number = self.icon_packages[selected_package].get(selected_icon)
-        if not icon_number:
-            messagebox.showwarning("Ошибка", "Неверная иконка.")
-            return
+        if selected_disk and selected_package and selected_icon:
+            selected_disk = selected_disk.strip(":\\/").upper()
+            icon_number = self.icon_packages[selected_package].get(selected_icon)
 
-        try:
-            subprocess.run(
-                [
-                    'reg', 'add',
-                    f'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}\\DefaultIcon',
-                    '/ve', '/d', f'{self.dll_path},-{icon_number}',
-                    '/t', 'REG_SZ', '/f'
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='cp866'
-            )
+            if selected_disk and icon_number:
+                try:
+                    subprocess.run(
+                        [
+                            'reg', 'add',
+                            f'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}\\DefaultIcon',
+                            '/ve', '/d', f'{self.dll_path},-{icon_number}',
+                            '/t', 'REG_SZ', '/f'
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding='cp866'
+                    )
 
-            self.show_message(f"Иконка для диска {selected_disk} установлена", "success")
+                    self.show_message(f"Иконка для диска {selected_disk} установлена", "success")
 
-        except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+                except subprocess.CalledProcessError:
+                    # Не показываем сообщение об ошибке
+                    pass
 
     def remove_icon(self):
         selected_disk = self.disk_var.get()
-        if not selected_disk:
-            messagebox.showwarning("Ошибка", "Выберите диск.")
-            return
+        if selected_disk:
+            selected_disk = selected_disk.strip(":\\/").upper()
 
-        selected_disk = selected_disk.strip(":\\/").upper()
-        if not selected_disk:
-            messagebox.showwarning("Ошибка", "Неверный формат диска.")
-            return
+            if selected_disk:
+                try:
+                    subprocess.run(
+                        [
+                            'reg', 'delete',
+                            f'HKLM\\SOFTWARE\\Microsoft\\Windows\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}',
+                            '/f'
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding='cp866'
+                    )
+                    self.show_message(f"Иконка для диска {selected_disk} удалена", "success")
 
-        try:
-            subprocess.run(
-                [
-                    'reg', 'delete',
-                    f'HKLM\\SOFTWARE\\Microsoft\\Windows\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}',
-                    '/f'
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding='cp866'
-            )
-            self.show_message(f"Иконка для диска {selected_disk} удалена", "success")
-
-        except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось удалить иконку")
+                except subprocess.CalledProcessError:
+                    # Не показываем сообщение об ошибке
+                    pass
 
     def remove_all_icons(self):
         try:
@@ -305,7 +290,8 @@ class Module:
             self.show_message("Все иконки дисков удалены", "success")
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось удалить иконки")
+            # Не показываем сообщение об ошибке
+            pass
 
     def show(self):
         self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)

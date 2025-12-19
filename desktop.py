@@ -6,8 +6,10 @@ import tkinter as tk
 import winreg
 from tkinter import ttk, messagebox
 
+# Импортируем централизованную информацию о DLL из main
 try:
     from main import DLLChecker
+
     HAS_DLL_CHECKER = True
 except ImportError:
     HAS_DLL_CHECKER = False
@@ -17,25 +19,38 @@ class Module:
     def __init__(self, parent, module_name=None):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-        self.module_name = module_name or "desktop"
+        self.module_name = module_name or "desktop"  # Сохраняем имя модуля
 
+        # Получаем путь к DLL через централизованный механизм
         self.dll_path = self.get_dll_path()
+
+        # Таймер для очистки сообщений
         self.message_timer = None
 
+        # Инициализация переменных
         self.initialize_registry_paths()
         self.initialize_icon_sets()
 
+        # Создание виджетов
         self.create_widgets()
         self.show()
 
     def get_dll_path(self):
+        """Получение пути к DLL через централизованный механизм"""
         if not HAS_DLL_CHECKER:
+            # Это маловероятно, но на всякий случай
             return None
 
+        # Используем специальный метод, который сам покажет предупреждения при необходимости
         dll_path = DLLChecker.get_dll_path_for_module(self.parent, self.module_name)
+
+        if dll_path:
+            print(f"✅ Для модуля {self.module_name}: Используется DLL: {dll_path}")
+
         return dll_path
 
     def initialize_registry_paths(self):
+        """Инициализация путей реестра"""
         self.CONTROL_PANEL_CLSIDS = {
             "main": "{26EE0668-A00A-44D7-9371-BEB064C98683}",
             "category_view": "{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}",
@@ -52,6 +67,7 @@ class Module:
         }
 
     def initialize_icon_sets(self):
+        """Инициализация наборов иконок"""
         BASE_ICON_SETS = {
             "Windows 95": {
                 "user": "-1",
@@ -141,6 +157,7 @@ class Module:
             self.ICON_SETS[name] = icons.copy()
 
     def show_message(self, message, message_type="info"):
+        """Показывает сообщение под кнопками"""
         if self.message_timer:
             self.parent.after_cancel(self.message_timer)
 
@@ -157,11 +174,13 @@ class Module:
         self.message_timer = self.parent.after(3000, self.clear_message)
 
     def clear_message(self):
+        """Очищает сообщение"""
         self.message_label.config(text="")
         self.message_label.pack_forget()
         self.message_timer = None
 
     def create_widgets(self):
+        """Создание виджетов интерфейса"""
         main_container = ttk.Frame(self.frame)
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -248,6 +267,7 @@ class Module:
         self.update_buttons_state()
 
     def update_buttons_state(self):
+        """Обновляет состояние кнопок в зависимости от наличия DLL"""
         if self.dll_path:
             self.apply_btn.config(state='normal')
         else:
@@ -256,14 +276,19 @@ class Module:
         self.reset_btn.config(state='normal')
 
     def on_icon_set_select(self, event=None):
+        """Обработчик выбора набора иконок"""
         selected_set = self.icon_set_var.get()
         if selected_set == "Windows XP":
             self.checkbox.config(state="normal")
+            self.create_tooltip(self.checkbox, "Включить иконки корзины от Whistler")
         else:
             self.checkbox.config(state="disabled")
             self.checkbox_var.set(False)
+            self.remove_tooltip(self.checkbox)
 
     def create_tooltip(self, widget, text):
+        """Создать всплывающую подсказку"""
+
         def enter(event):
             x, y, cx, cy = widget.bbox("insert")
             x += widget.winfo_rootx() + 25
@@ -285,6 +310,7 @@ class Module:
         widget.bind("<Leave>", leave)
 
     def remove_tooltip(self, widget):
+        """Удалить привязки всплывающей подсказки"""
         widget.unbind("<Enter>")
         widget.unbind("<Leave>")
         if hasattr(self, 'tooltip_window') and self.tooltip_window:
@@ -292,25 +318,14 @@ class Module:
             delattr(self, 'tooltip_window')
 
     def is_admin(self):
+        """Проверка прав администратора"""
         try:
             return ctypes.windll.shell32.IsUserAnAdmin()
         except:
             return False
 
-    def request_admin(self):
-        if not self.is_admin():
-            response = messagebox.askyesno(
-                "Требуются права администратора",
-                "Для изменения иконок рабочего стола требуются права администратора.\n"
-                "Перезапустить приложение с правами администратора?"
-            )
-            if response:
-                ctypes.windll.shell32.ShellExecuteW(
-                    None, "runas", sys.executable, " ".join(sys.argv), None, 1
-                )
-                sys.exit()
-
     def refresh_icon_cache(self):
+        """Обновление кэша иконок"""
         try:
             subprocess.run(['ie4uinit.exe', '-show'], capture_output=True, timeout=10)
             return True
@@ -319,6 +334,7 @@ class Module:
 
     def set_icon(self, reg_path, icon_value, param_name="", use_local_machine=False, use_classes_root=False,
                  is_reset=False):
+        """Установка иконки в реестре"""
         try:
             if use_classes_root:
                 registry_key = winreg.HKEY_CLASSES_ROOT
@@ -336,17 +352,19 @@ class Module:
                 full_value = icon_value
             else:
                 if not self.dll_path:
-                    messagebox.showerror("Ошибка", "Внимание! DLL файл не найден!")
+                    # Не показываем сообщение здесь - оно уже было показано при загрузке модуля
                     return False
                 full_value = f"{self.dll_path},{icon_value}"
 
             winreg.SetValueEx(key, param_name, 0, winreg.REG_SZ, full_value)
             winreg.CloseKey(key)
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Ошибка установки иконки: {e}")
             return False
 
     def set_control_panel_icons(self, icon_value, is_reset=False):
+        """Установка иконок для панели управления во всех необходимых местах"""
         success_count = 0
 
         control_panel_paths = [
@@ -371,12 +389,13 @@ class Module:
 
                 self.set_icon(reg_path, icon_value, is_reset=is_reset)
                 success_count += 1
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Ошибка установки иконки панели управления в {reg_path}: {e}")
 
         return success_count
 
     def reset_libraries_icon(self):
+        """Сброс иконки библиотек на стандартную"""
         try:
             reg_path = self.REG_PATHS["libraries"]
             key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, reg_path, 0, winreg.KEY_WRITE)
@@ -387,21 +406,18 @@ class Module:
             return False
 
     def apply_icon_set(self):
+        """Применение выбранного набора иконок"""
+        # Проверка наличия DLL (уже проверялось при загрузке, но проверяем на всякий случай)
         if not self.dll_path:
-            messagebox.showerror("Ошибка", "Внимание! DLL файл не найден!")
-            return
-
-        if not self.is_admin():
-            self.request_admin()
+            # Не показываем сообщение - оно уже было показано при загрузке модуля
             return
 
         selected_set = self.icon_set_var.get()
-        if not selected_set:
-            messagebox.showwarning("Внимание", "Пожалуйста, выберите набор иконок.")
-            return
+        # Не проверяем выбор набора - он всегда есть по умолчанию "Windows 95"
 
         icon_set = self.ICON_SETS.get(selected_set)
         if not icon_set:
+            # Эта проверка остаётся на случай ошибки в данных
             messagebox.showerror("Ошибка", "Неверный набор иконок.")
             return
 
@@ -431,16 +447,16 @@ class Module:
             self.refresh_icon_cache()
 
             message_text = f"Набор иконок '{selected_set}' успешно применён!"
+            if selected_set == "Windows XP" and self.checkbox_var.get():
+                message_text += " Применены иконки корзины от Whistler."
+
             self.show_message(message_text, "success")
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Произошла ошибка при применении иконок:\n\n{str(e)}")
 
     def reset_icons(self):
-        if not self.is_admin():
-            self.request_admin()
-            return
-
+        """Сброс иконок на стандартные"""
         try:
             default_icons = {
                 "user": r"C:\Windows\System32\imageres.dll,-123",
@@ -459,8 +475,8 @@ class Module:
                         self.set_icon(reg_path, default_icons["recycle_bin_full"], "", is_reset=True)
                     else:
                         self.set_icon(reg_path, value, is_reset=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Ошибка при сбросе иконки {key}: {e}")
 
             self.set_control_panel_icons("", is_reset=True)
             self.reset_libraries_icon()
@@ -472,7 +488,9 @@ class Module:
             messagebox.showerror("Ошибка", f"Произошла ошибка при сбросе иконок:\n\n{str(e)}")
 
     def show(self):
+        """Показать модуль"""
         self.frame.pack(fill=tk.BOTH, expand=True)
 
     def hide(self):
+        """Скрыть модуль"""
         self.frame.pack_forget()

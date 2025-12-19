@@ -167,9 +167,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def toggle_notification_center(self):
         """Включить или отключить Центр уведомлений."""
@@ -220,9 +220,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def toggle_taskbar_size(self):
         """Переключить размер значков на панели задач (большие/маленькие)."""
@@ -255,9 +255,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def toggle_search(self):
         """Скрыть или показать Поиск на панели задач."""
@@ -290,9 +290,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def toggle_people(self):
         """Скрыть или показать Люди на панели задач."""
@@ -341,9 +341,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def toggle_task_view(self):
         """Скрыть или показать Просмотр задач на панели задач."""
@@ -379,9 +379,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def restart_explorer(self):
         """Перезапустить Проводник Windows."""
@@ -392,9 +392,9 @@ class Module:
             subprocess.Popen(['explorer.exe'])
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось перезапустить Проводник")
+            pass  # Не показываем сообщение об ошибке
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла ошибка при перезагрузке Проводника")
+            pass  # Не показываем сообщение об ошибке
 
     def reset_all_settings(self):
         """Сбросить все настройки панели задач к значениям по умолчанию."""
@@ -456,7 +456,7 @@ class Module:
                     continue
 
         except Exception:
-            messagebox.showerror("Ошибка", "Произошла непредвиденная ошибка")
+            pass  # Не показываем сообщение об ошибке
 
     def show(self):
         """Показать модуль"""

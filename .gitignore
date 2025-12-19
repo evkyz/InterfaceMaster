@@ -2,6 +2,8 @@ venv/
 env/
 .venv/
 __pycache__/
+dist/
+mod/
 *.py[cod]
 *$py.class
 .idea/
@@ -9,3 +11,5 @@ __pycache__/
 *.iml
 .DS_Store
 Thumbs.db
+build.bat
+imaster.dll

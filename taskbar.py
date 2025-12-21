@@ -1,14 +1,60 @@
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
+import sys
 
 
 class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
+        self.windows_version = self.get_windows_version()
         self.create_widgets()
         self.show()
+
+    def get_windows_version(self):
+        """Получает версию Windows"""
+        try:
+            # Используем более надежный способ получения версии Windows
+            result = subprocess.run(
+                ['wmic', 'os', 'get', 'Version', '/value'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            # Ищем версию в выводе
+            import re
+            match = re.search(r'Version=(\d+\.\d+\.\d+)', result.stdout)
+            if match:
+                return match.group(1)
+
+            # Альтернативный способ через reg
+            result = subprocess.run(
+                ['reg', 'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion', '/v', 'CurrentBuildNumber'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            match = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', result.stdout)
+            if match:
+                return f"10.0.{match.group(1)}"
+
+            return "10.0.0"
+        except:
+            return "10.0.0"
+
+    def is_windows_version_supported(self):
+        """Проверяет, поддерживается ли функция Провести собрание (Windows 21H2 и выше)"""
+        try:
+            # Получаем номер сборки из версии
+            version_parts = self.windows_version.split('.')
+            if len(version_parts) >= 3:
+                build_number = int(version_parts[2])
+                # Windows 21H2 имеет номер сборки 19044 и выше
+                return build_number >= 19044
+            return False
+        except:
+            return False
 
     def create_tooltip(self, widget, text):
         """Создает всплывающую подсказку для виджета."""
@@ -31,6 +77,164 @@ class Module:
         widget.bind("<Enter>", on_enter)
         widget.bind("<Leave>", on_leave)
 
+    def check_weekday_state(self):
+        """Проверяет состояние отображения дня недели"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKCU\\Control Panel\\International', '/v', 'sShortDate'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "ddd" in result.stdout
+        except:
+            return False
+
+    def check_notification_center_state(self):
+        """Проверяет состояние Центра уведомлений"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer', '/v',
+                 'DisableNotificationCenter'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "0x1" in result.stdout
+        except:
+            return False
+
+    def check_taskbar_size_state(self):
+        """Проверяет состояние размера значков (большие/маленькие)"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', '/v',
+                 'TaskbarSmallIcons'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "0x1" in result.stdout
+        except:
+            return False
+
+    def check_search_state(self):
+        """Проверяет состояние Поиска"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search', '/v',
+                 'SearchboxTaskbarMode'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            # 0=скрыт, 1=значок, 2=поле
+            if "0x0" in result.stdout:
+                return 0  # Скрыто
+            elif "0x1" in result.stdout:
+                return 1  # Значок
+            elif "0x2" in result.stdout:
+                return 2  # Поле
+            else:
+                return 2  # По умолчанию - поле
+        except:
+            return 2  # По умолчанию - поле
+
+    def check_people_state(self):
+        """Проверяет состояние кнопки 'Люди'"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer', '/v', 'HidePeopleBar'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "0x1" in result.stdout
+        except:
+            return False
+
+    def check_task_view_state(self):
+        """Проверяет состояние кнопки 'Просмотр задач'"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query',
+                 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', '/v',
+                 'ShowTaskViewButton'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "0x0" in result.stdout
+        except:
+            return False
+
+    def check_meet_now_state(self):
+        """Проверяет состояние кнопки 'Провести собрание'"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', '/v',
+                 'HideSCAMeetNow'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            return "0x1" in result.stdout
+        except:
+            return False
+
+    def check_grouping_state(self):
+        """Проверяет состояние группировки кнопок"""
+        try:
+            result = subprocess.run(
+                ['reg', 'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', '/v',
+                 'TaskbarGlomLevel'],
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+            # 0=Всегда, 1=При заполнении, 2=Никогда
+            if "0x0" in result.stdout:
+                return 0  # Всегда
+            elif "0x1" in result.stdout:
+                return 1  # При заполнении
+            elif "0x2" in result.stdout:
+                return 2  # Никогда
+            else:
+                return 1  # По умолчанию - При заполнении
+        except:
+            return 1  # По умолчанию - При заполнении
+
+    def update_button_text(self, button, base_text, state, is_search=False, is_grouping=False):
+        """Обновляет текст кнопки с учетом состояния"""
+        if button == self.toggle_taskbar_size_button:
+            # Для кнопки изменения размера значков особая логика
+            if state:
+                button.config(text=f"{base_text} (Маленькие)")
+            else:
+                button.config(text=f"{base_text} (Большие)")
+        elif is_search:
+            # Для кнопки поиска специальная логика с тремя состояниями
+            if state == 0:
+                button.config(text=f"{base_text} (Скрыто)")
+            elif state == 1:
+                button.config(text=f"{base_text} (Значок)")
+            else:  # state == 2
+                button.config(text=f"{base_text} (Поле)")
+        elif is_grouping:
+            # Для кнопки группировки специальная логика с тремя состояниями
+            if state == 0:
+                button.config(text=f"{base_text} (Всегда)")
+            elif state == 1:
+                button.config(text=f"{base_text} (При заполнении)")
+            else:  # state == 2
+                button.config(text=f"{base_text} (Никогда)")
+        else:
+            # Для всех остальных кнопок
+            if state:
+                button.config(text=f"{base_text} (Показано)")
+            else:
+                button.config(text=f"{base_text} (Скрыто)")
+
     def create_widgets(self):
         """Создание виджетов для настройки панели задач"""
         title_label = ttk.Label(
@@ -52,61 +256,106 @@ class Module:
         settings_frame = ttk.LabelFrame(self.frame, text="Доступные настройки", padding=15)
         settings_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
+        # Кнопка для дня недели
+        weekday_state = self.check_weekday_state()
         self.toggle_weekday_button = ttk.Button(
             settings_frame,
-            text="Добавить/Убрать день недели в дате",
-            command=self.toggle_weekday,
-            width=35
+            text="Добавить/Убрать день недели в дате" + (" (Показано)" if weekday_state else " (Скрыто)"),
+            command=lambda: self.toggle_weekday_with_update(),
+            width=45
         )
         self.toggle_weekday_button.pack(pady=8, fill=tk.X)
         self.create_tooltip(self.toggle_weekday_button, "Добавляет или убирает отображение дня недели в системной дате")
 
+        # Кнопка для Центра уведомлений
+        notification_state = self.check_notification_center_state()
         self.toggle_notification_center_button = ttk.Button(
             settings_frame,
-            text="Добавить/Убрать Центр уведомлений",
-            command=self.toggle_notification_center,
-            width=35
+            text="Добавить/Убрать Центр уведомлений" + (" (Показано)" if not notification_state else " (Скрыто)"),
+            command=lambda: self.toggle_notification_center_with_update(),
+            width=45
         )
         self.toggle_notification_center_button.pack(pady=8, fill=tk.X)
         self.create_tooltip(self.toggle_notification_center_button, "Включает или отключает Центр уведомлений Windows")
 
+        # Кнопка для размера значков (особый случай)
+        taskbar_size_state = self.check_taskbar_size_state()
         self.toggle_taskbar_size_button = ttk.Button(
             settings_frame,
-            text="Переключить размер значков панели задач",
-            command=self.toggle_taskbar_size,
-            width=35
+            text="Переключить размер значков панели задач" + (" (маленькие)" if taskbar_size_state else " (большие)"),
+            command=lambda: self.toggle_taskbar_size_with_update(),
+            width=45
         )
         self.toggle_taskbar_size_button.pack(pady=8, fill=tk.X)
         self.create_tooltip(self.toggle_taskbar_size_button,
                             "Переключает между большими и маленькими значками на панели задач")
 
+        # Кнопка для Поиска (3 состояния)
+        search_state = self.check_search_state()
+        search_texts = {0: " (Скрыто)", 1: " (Значок)", 2: " (Поле)"}
         self.toggle_search_button = ttk.Button(
             settings_frame,
-            text="Скрыть/Показать Поиск",
-            command=self.toggle_search,
-            width=35
+            text="Скрыть/Показать Поиск" + search_texts[search_state],
+            command=lambda: self.toggle_search_with_update(),
+            width=45
         )
         self.toggle_search_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.toggle_search_button, "Скрывает или показывает поле поиска на панели задач")
+        self.create_tooltip(self.toggle_search_button, "Циклически переключает: Поле → Значок → Скрыто → Поле...")
 
+        # Кнопка для Люди
+        people_state = self.check_people_state()
         self.toggle_people_button = ttk.Button(
             settings_frame,
-            text="Скрыть/Показать Люди",
-            command=self.toggle_people,
-            width=35
+            text="Скрыть/Показать Люди" + (" (Показано)" if not people_state else " (Скрыто)"),
+            command=lambda: self.toggle_people_with_update(),
+            width=45
         )
         self.toggle_people_button.pack(pady=8, fill=tk.X)
         self.create_tooltip(self.toggle_people_button, "Скрывает или показывает кнопку 'Люди' на панели задач")
 
+        # Кнопка для Просмотр задач
+        task_view_state = self.check_task_view_state()
         self.toggle_task_view_button = ttk.Button(
             settings_frame,
-            text="Скрыть/Показать Просмотр задач",
-            command=self.toggle_task_view,
-            width=35
+            text="Скрыть/Показать Просмотр задач" + (" (Показано)" if not task_view_state else " (Скрыто)"),
+            command=lambda: self.toggle_task_view_with_update(),
+            width=45
         )
         self.toggle_task_view_button.pack(pady=8, fill=tk.X)
         self.create_tooltip(self.toggle_task_view_button,
                             "Скрывает или показывает кнопку 'Просмотр задач' на панели задач")
+
+        # Кнопка для Провести собрание
+        meet_now_state = self.check_meet_now_state() if self.is_windows_version_supported() else False
+        self.toggle_meet_now_button = ttk.Button(
+            settings_frame,
+            text="Скрыть/Показать Провести собрание" + (" (Показано)" if not meet_now_state else " (Скрыто)"),
+            command=lambda: self.toggle_meet_now_with_update(),
+            width=45
+        )
+        self.toggle_meet_now_button.pack(pady=8, fill=tk.X)
+
+        # Проверяем версию Windows и активируем/деактивируем кнопку
+        if self.is_windows_version_supported():
+            self.create_tooltip(self.toggle_meet_now_button,
+                                "Скрывает или показывает кнопку 'Провести собрание' на панели задач")
+        else:
+            self.toggle_meet_now_button.config(state='disabled')
+            self.create_tooltip(self.toggle_meet_now_button,
+                                "Эта функция доступна только в Windows 21H2 (19044) и выше")
+
+        # Кнопка для группировки кнопок (3 состояния)
+        grouping_state = self.check_grouping_state()
+        grouping_texts = {0: " (Всегда)", 1: " (При заполнении)", 2: " (Никогда)"}
+        self.toggle_grouping_button = ttk.Button(
+            settings_frame,
+            text="Изменить группировку кнопок" + grouping_texts[grouping_state],
+            command=lambda: self.toggle_grouping_with_update(),
+            width=45
+        )
+        self.toggle_grouping_button.pack(pady=8, fill=tk.X)
+        self.create_tooltip(self.toggle_grouping_button,
+                            "Циклически переключает: Всегда → При заполнении → Никогда → Всегда...")
 
         extra_frame = ttk.Frame(settings_frame)
         extra_frame.pack(fill=tk.X, pady=15)
@@ -136,6 +385,48 @@ class Module:
             justify=tk.CENTER
         )
         info_label.pack(pady=10)
+
+    # Оберточные функции для обновления текста кнопок после выполнения
+    def toggle_weekday_with_update(self):
+        self.toggle_weekday()
+        new_state = self.check_weekday_state()
+        self.update_button_text(self.toggle_weekday_button, "Добавить/Убрать день недели в дате", new_state)
+
+    def toggle_notification_center_with_update(self):
+        self.toggle_notification_center()
+        new_state = self.check_notification_center_state()
+        self.update_button_text(self.toggle_notification_center_button, "Добавить/Убрать Центр уведомлений",
+                                not new_state)
+
+    def toggle_taskbar_size_with_update(self):
+        self.toggle_taskbar_size()
+        new_state = self.check_taskbar_size_state()
+        self.update_button_text(self.toggle_taskbar_size_button, "Переключить размер значков панели задач", new_state)
+
+    def toggle_search_with_update(self):
+        self.toggle_search()
+        new_state = self.check_search_state()
+        self.update_button_text(self.toggle_search_button, "Скрыть/Показать Поиск", new_state, is_search=True)
+
+    def toggle_people_with_update(self):
+        self.toggle_people()
+        new_state = self.check_people_state()
+        self.update_button_text(self.toggle_people_button, "Скрыть/Показать Люди", not new_state)
+
+    def toggle_task_view_with_update(self):
+        self.toggle_task_view()
+        new_state = self.check_task_view_state()
+        self.update_button_text(self.toggle_task_view_button, "Скрыть/Показать Просмотр задач", not new_state)
+
+    def toggle_meet_now_with_update(self):
+        self.toggle_meet_now()
+        new_state = self.check_meet_now_state()
+        self.update_button_text(self.toggle_meet_now_button, "Скрыть/Показать Провести собрание", not new_state)
+
+    def toggle_grouping_with_update(self):
+        self.toggle_grouping()
+        new_state = self.check_grouping_state()
+        self.update_button_text(self.toggle_grouping_button, "Изменить группировку кнопок", new_state, is_grouping=True)
 
     def toggle_weekday(self):
         """Добавить или убрать день недели в формате даты."""
@@ -260,34 +551,26 @@ class Module:
             pass  # Не показываем сообщение об ошибке
 
     def toggle_search(self):
-        """Скрыть или показать Поиск на панели задач."""
+        """Циклически переключить состояние Поиска: Поле → Значок → Скрыто → Поле..."""
         try:
-            result = subprocess.run(
-                ['reg', 'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search', '/v',
-                 'SearchboxTaskbarMode'],
+            current_state = self.check_search_state()
+
+            # Циклическое переключение: 2→1→0→2...
+            if current_state == 2:  # Поле → Значок
+                new_value = 1
+            elif current_state == 1:  # Значок → Скрыто
+                new_value = 0
+            else:  # Скрыто → Поле
+                new_value = 2
+
+            subprocess.run(
+                ['reg', 'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search', '/V',
+                 'SearchboxTaskbarMode', '/D', str(new_value), '/T', 'REG_DWORD', '/f'],
+                check=True,
                 capture_output=True,
                 text=True,
                 encoding='cp866'
             )
-
-            if "0x2" in result.stdout:
-                subprocess.run(
-                    ['reg', 'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search', '/V',
-                     'SearchboxTaskbarMode', '/D', '0', '/T', 'REG_DWORD', '/f'],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    encoding='cp866'
-                )
-            else:
-                subprocess.run(
-                    ['reg', 'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search', '/V',
-                     'SearchboxTaskbarMode', '/D', '2', '/T', 'REG_DWORD', '/f'],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    encoding='cp866'
-                )
 
         except subprocess.CalledProcessError:
             pass  # Не показываем сообщение об ошибке
@@ -383,6 +666,90 @@ class Module:
         except Exception:
             pass  # Не показываем сообщение об ошибке
 
+    def toggle_meet_now(self):
+        """Скрыть или показать кнопку 'Провести собрание' на панели задач."""
+        try:
+            # Проверяем текущее состояние
+            try:
+                result = subprocess.run(
+                    ['reg', 'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', '/v',
+                     'HideSCAMeetNow'],
+                    capture_output=True,
+                    text=True,
+                    encoding='cp866'
+                )
+                if "0x1" in result.stdout:
+                    current_value = 1
+                else:
+                    current_value = 0
+            except subprocess.CalledProcessError:
+                current_value = 0
+
+            # Переключаем состояние
+            if current_value == 1:
+                # Если параметр существует и равен 1, удаляем его
+                try:
+                    subprocess.run(
+                        ['reg', 'delete', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
+                         '/v', 'HideSCAMeetNow', '/f'],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        encoding='cp866'
+                    )
+                except subprocess.CalledProcessError:
+                    # Если не удалось удалить, устанавливаем значение 0
+                    subprocess.run(
+                        ['reg', 'add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
+                         '/v', 'HideSCAMeetNow', '/d', '0', '/t', 'REG_DWORD', '/f'],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        encoding='cp866'
+                    )
+            else:
+                # Если параметр не существует или равен 0, устанавливаем 1
+                subprocess.run(
+                    ['reg', 'add', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
+                     '/v', 'HideSCAMeetNow', '/d', '1', '/t', 'REG_DWORD', '/f'],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding='cp866'
+                )
+
+        except subprocess.CalledProcessError:
+            pass  # Не показываем сообщение об ошибке
+        except Exception:
+            pass  # Не показываем сообщение об ошибке
+
+    def toggle_grouping(self):
+        """Циклически переключить состояние группировки кнопок: Всегда → При заполнении → Никогда → Всегда..."""
+        try:
+            current_state = self.check_grouping_state()
+
+            # Циклическое переключение: 0→1→2→0...
+            if current_state == 0:  # Всегда → При заполнении
+                new_value = 1
+            elif current_state == 1:  # При заполнении → Никогда
+                new_value = 2
+            else:  # Никогда → Всегда
+                new_value = 0
+
+            subprocess.run(
+                ['reg', 'add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', '/V',
+                 'TaskbarGlomLevel', '/D', str(new_value), '/T', 'REG_DWORD', '/f'],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='cp866'
+            )
+
+        except subprocess.CalledProcessError:
+            pass  # Не показываем сообщение об ошибке
+        except Exception:
+            pass  # Не показываем сообщение об ошибке
+
     def restart_explorer(self):
         """Перезапустить Проводник Windows."""
         try:
@@ -407,6 +774,8 @@ class Module:
                  'REG_DWORD'],
                 ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', 'ShowTaskViewButton', '1',
                  'REG_DWORD'],
+                ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', 'TaskbarGlomLevel', '1',
+                 'REG_DWORD'],  # При заполнении по умолчанию
             ]
 
             notification_center_settings = [
@@ -417,6 +786,12 @@ class Module:
             policies_to_delete = [
                 ['HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer', 'HidePeopleBar'],
             ]
+
+            # Добавляем настройку для MeetNow в сброс, если она поддерживается
+            if self.is_windows_version_supported():
+                policies_to_delete.append(
+                    ['HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', 'HideSCAMeetNow']
+                )
 
             for setting in settings_to_reset:
                 try:
@@ -455,8 +830,60 @@ class Module:
                 except subprocess.CalledProcessError:
                     continue
 
-        except Exception:
-            pass  # Не показываем сообщение об ошибке
+            # Обновляем тексты кнопок после сброса
+            self.update_all_button_texts()
+
+            # Показываем всплывающее окно об успешном сбросе
+            messagebox.showinfo(
+                "Сброс настроек",
+                "Настройки сброшены по умолчанию"
+            )
+
+        except Exception as e:
+            # Показываем сообщение об ошибке
+            messagebox.showerror(
+                "Ошибка сброса настроек",
+                f"Не удалось сбросить настройки.\nОшибка: {str(e)}"
+            )
+
+    def update_all_button_texts(self):
+        """Обновляет тексты всех кнопок после сброса настроек"""
+        # День недели
+        weekday_state = self.check_weekday_state()
+        self.update_button_text(self.toggle_weekday_button, "Добавить/Убрать день недели в дате", weekday_state)
+
+        # Центр уведомлений
+        notification_state = self.check_notification_center_state()
+        self.update_button_text(self.toggle_notification_center_button, "Добавить/Убрать Центр уведомлений",
+                                not notification_state)
+
+        # Размер значков
+        taskbar_size_state = self.check_taskbar_size_state()
+        self.update_button_text(self.toggle_taskbar_size_button, "Переключить размер значков панели задач",
+                                taskbar_size_state)
+
+        # Поиск
+        search_state = self.check_search_state()
+        self.update_button_text(self.toggle_search_button, "Скрыть/Показать Поиск", search_state, is_search=True)
+
+        # Люди
+        people_state = self.check_people_state()
+        self.update_button_text(self.toggle_people_button, "Скрыть/Показать Люди", not people_state)
+
+        # Просмотр задач
+        task_view_state = self.check_task_view_state()
+        self.update_button_text(self.toggle_task_view_button, "Скрыть/Показать Просмотр задач", not task_view_state)
+
+        # Провести собрание
+        if self.is_windows_version_supported():
+            meet_now_state = self.check_meet_now_state()
+            self.update_button_text(self.toggle_meet_now_button, "Скрыть/Показать Провести собрание",
+                                    not meet_now_state)
+
+        # Группировка кнопок
+        grouping_state = self.check_grouping_state()
+        self.update_button_text(self.toggle_grouping_button, "Изменить группировку кнопок", grouping_state,
+                                is_grouping=True)
 
     def show(self):
         """Показать модуль"""

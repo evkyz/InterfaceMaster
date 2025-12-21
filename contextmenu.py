@@ -1636,7 +1636,7 @@ class Module:
                 if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
                     try:
                         winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHine, key_path, 0, winreg.KEY_SET_VALUE) as key:
                             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Taskband Pin")
                         self.update_menu_items_status()
                     except:
@@ -2426,16 +2426,39 @@ class Module:
             if not items:
                 return
 
+            # Проверяем текущее состояние всех пунктов
+            all_enabled = all(item["enabled"] for item in items)
             all_disabled = all(not item["enabled"] for item in items)
 
-            for item in items:
-                if all_disabled:
-                    if not item["enabled"]:
-                        self.enable_new_menu_item(item["ext"], item.get("path"))
-                else:
-                    if item["enabled"]:
-                        self.disable_new_menu_item(item["ext"], item.get("path"))
+            # Определяем действие: если есть хоть один включенный - отключаем всё, иначе включаем всё
+            enable_all = all_disabled
 
+            for item in items:
+                try:
+                    if enable_all:
+                        # Включаем все отключенные пункты
+                        if not item["enabled"]:
+                            if item["ext"] == '.folder':
+                                # Особый случай для папки (работа с HKCR)
+                                self.enable_folder_menu_item(item.get("path"))
+                            else:
+                                # Для остальных пунктов (работа с HKLM)
+                                self.enable_new_menu_item(item["ext"], item.get("path"))
+                    else:
+                        # Отключаем все включенные пункты
+                        if item["enabled"]:
+                            if item["ext"] == '.folder':
+                                # Особый случай для папки
+                                self.disable_folder_menu_item(item.get("path"))
+                            else:
+                                # Для остальных пунктов
+                                self.disable_new_menu_item(item["ext"], item.get("path"))
+                except Exception as e:
+                    print(f"Ошибка при переключении пункта {item['name']}: {e}")
+                    # Показываем ошибку только для конкретного пункта
+                    messagebox.showerror("Ошибка", f"Не удалось переключить пункт '{item['name']}': {str(e)}")
+
+            # Обновляем список
             self.refresh_new_menu_list()
 
         except Exception as e:
@@ -2530,6 +2553,44 @@ class Module:
         """Получение списка пунктов меню Создать (используем HKLM)"""
         items = []
         try:
+            # Добавляем пункт "Папка" в начало списка
+            folder_ext = '.folder'  # Виртуальное расширение для папки
+            folder_path = r'Folder\ShellNew'
+
+            # Проверяем состояние папки (работа с HKCR)
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, folder_path):
+                    items.append({
+                        "ext": folder_ext,
+                        "name": "Папка",
+                        "enabled": True,
+                        "path": folder_path
+                    })
+            except FileNotFoundError:
+                folder_no_path = folder_path + '_no'
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, folder_no_path):
+                        items.append({
+                            "ext": folder_ext,
+                            "name": "Папка",
+                            "enabled": False,
+                            "path": folder_path
+                        })
+                except FileNotFoundError:
+                    # Проверяем, может быть вообще нет записи для папки
+                    try:
+                        # Проверяем, есть ли хотя бы ключ Folder
+                        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, 'Folder'):
+                            items.append({
+                                "ext": folder_ext,
+                                "name": "Папка",
+                                "enabled": False,
+                                "path": folder_path
+                            })
+                    except FileNotFoundError:
+                        # Ключа Folder нет вообще
+                        pass
+
             target_extensions = {
                 '.bmp': r'SOFTWARE\Classes\.bmp\ShellNew',
                 '.contact': r'SOFTWARE\Classes\.contact\ShellNew',
@@ -2618,8 +2679,8 @@ class Module:
                 except:
                     pass
 
-        except:
-            pass
+        except Exception as e:
+            print(f"Ошибка в get_new_menu_items: {e}")
 
         return items
 
@@ -2719,6 +2780,7 @@ class Module:
     def get_file_type_name(self, ext):
         """Получение читаемого имени для расширения файла"""
         basic_names = {
+            '.folder': 'Папка',
             '.bmp': 'Рисунок BMP',
             '.contact': 'Контакт',
             '.lnk': 'Ярлык',
@@ -2740,6 +2802,13 @@ class Module:
     def toggle_new_menu_item(self, ext, base_path=None):
         """Переключение состояния пункта меню Создать (HKLM)"""
         try:
+            # Особый случай для папки
+            if ext == '.folder':
+                if base_path is None:
+                    base_path = r'Folder\ShellNew'
+
+                return self.toggle_folder_menu_item(base_path)
+
             if base_path is None:
                 base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
 
@@ -2748,30 +2817,27 @@ class Module:
 
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                    if self.disable_new_menu_item(ext, base_path):
-                        self.refresh_new_menu_list()
-                    else:
+                    if not self.disable_new_menu_item(ext, base_path):
                         messagebox.showerror("Ошибка", f"Не удалось отключить пункт '{self.get_file_type_name(ext)}'")
+                    self.refresh_new_menu_list()
                     return
             except FileNotFoundError:
                 pass
 
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
-                    if self.enable_new_menu_item(ext, base_path):
-                        self.refresh_new_menu_list()
-                    else:
+                    if not self.enable_new_menu_item(ext, base_path):
                         messagebox.showerror("Ошибка", f"Не удалось включить пункт '{self.get_file_type_name(ext)}'")
+                    self.refresh_new_menu_list()
                     return
             except FileNotFoundError:
                 if ext in ['.docx', '.xlsx', '.pptx', '.pub']:
                     try:
                         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, f"SOFTWARE\\Classes\\{ext}"):
                             pass
-                        if self.enable_new_menu_item(ext, base_path):
-                            self.refresh_new_menu_list()
-                        else:
+                        if not self.enable_new_menu_item(ext, base_path):
                             messagebox.showerror("Ошибка", f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
+                        self.refresh_new_menu_list()
                         return
                     except FileNotFoundError:
                         if ext == '.docx':
@@ -2788,11 +2854,10 @@ class Module:
                         if alt_path:
                             try:
                                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, alt_path):
-                                    if self.enable_new_menu_item(ext, base_path):
-                                        self.refresh_new_menu_list()
-                                    else:
+                                    if not self.enable_new_menu_item(ext, base_path):
                                         messagebox.showerror("Ошибка",
                                                              f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
+                                    self.refresh_new_menu_list()
                                     return
                             except FileNotFoundError:
                                 messagebox.showinfo("Информация",
@@ -2803,13 +2868,113 @@ class Module:
                                                 f"Microsoft Office не установлен или тип файла {ext} не ассоциирован")
                             return
                 else:
-                    if self.enable_new_menu_item(ext, base_path):
-                        self.refresh_new_menu_list()
-                    else:
+                    if not self.enable_new_menu_item(ext, base_path):
                         messagebox.showerror("Ошибка", f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
+                    self.refresh_new_menu_list()
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при переключении пункта: {str(e)}")
+
+    def toggle_folder_menu_item(self, base_path):
+        """Переключение пункта 'Папка' в меню Создать"""
+        try:
+            shellnew_path = base_path
+            shellnew_no_path = base_path + '_no'
+
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
+                    if not self.disable_folder_menu_item(base_path):
+                        messagebox.showerror("Ошибка", "Не удалось отключить пункт 'Папка'")
+                    self.refresh_new_menu_list()
+                    return True
+            except FileNotFoundError:
+                pass
+
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
+                    if not self.enable_folder_menu_item(base_path):
+                        messagebox.showerror("Ошибка", "Не удалось включить пункт 'Папка'")
+                    self.refresh_new_menu_list()
+                    return True
+            except FileNotFoundError:
+                if not self.enable_folder_menu_item(base_path):
+                    messagebox.showerror("Ошибка", "Не удалось создать пункт 'Папка'")
+                self.refresh_new_menu_list()
+                return True
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при переключении пункта 'Папка': {str(e)}")
+            return False
+
+    def enable_folder_menu_item(self, base_path):
+        """Включение пункта 'Папка' в меню Создать"""
+        try:
+            if base_path is None:
+                base_path = r'Folder\ShellNew'
+
+            shellnew_path = base_path
+            shellnew_no_path = base_path + '_no'
+
+            # Сначала пытаемся переименовать из _no в обычный
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
+                    if self.rename_registry_key(winreg.HKEY_CLASSES_ROOT, shellnew_no_path, shellnew_path):
+                        return True
+                    else:
+                        raise Exception("Не удалось переименовать ключ папки")
+            except FileNotFoundError:
+                pass
+
+            # Если нет _no, проверяем может ключ уже существует
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
+                    # Ключ уже существует и включен
+                    return True
+            except FileNotFoundError:
+                # Если ключа нет вообще, создаем минимальную запись для папки
+                try:
+                    winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, shellnew_path)
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path, 0, winreg.KEY_SET_VALUE) as key:
+                        winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                    return True
+                except Exception as e:
+                    raise Exception(f"Не удалось создать ключ папки: {e}")
+
+        except Exception as e:
+            print(f"Ошибка в enable_folder_menu_item: {e}")
+            return False
+
+    def disable_folder_menu_item(self, base_path):
+        """Отключение пункта 'Папка' в меню Создать"""
+        try:
+            if base_path is None:
+                base_path = r'Folder\ShellNew'
+
+            shellnew_path = base_path
+            shellnew_no_path = base_path + '_no'
+
+            # Проверяем, существует ли уже отключенная версия
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
+                    # Уже отключено
+                    return True
+            except FileNotFoundError:
+                pass
+
+            # Пытаемся переименовать обычный ключ в _no
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
+                    if self.rename_registry_key(winreg.HKEY_CLASSES_ROOT, shellnew_path, shellnew_no_path):
+                        return True
+                    else:
+                        raise Exception("Не удалось переименовать ключ папки")
+            except FileNotFoundError:
+                # Если ключа нет, значит он уже отключен или не существует
+                return True
+
+        except Exception as e:
+            print(f"Ошибка в disable_folder_menu_item: {e}")
+            return False
 
     def enable_new_menu_item(self, ext, base_path=None):
         """Включение пункта в меню Создать (HKLM)"""
@@ -2821,22 +2986,62 @@ class Module:
             shellnew_no_path = base_path + '_no'
 
             try:
+                # Пытаемся переименовать из _no в обычный
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
                     if self.rename_registry_key(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path, shellnew_path):
                         return True
                     else:
-                        return False
+                        raise Exception(f"Не удалось переименовать ключ для {ext}")
             except FileNotFoundError:
+                # Если нет _no, проверяем может ключ уже существует
                 try:
-                    if ext in ['.docx', '.xlsx', '.pptx', '.pub']:
-                        return self.create_office_shellnew_entry(ext, shellnew_path)
-                    else:
-                        winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path)
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
+                        # Ключ уже существует и включен
                         return True
-                except:
-                    return False
+                except FileNotFoundError:
+                    # Если ключа нет вообще, создаем его
+                    try:
+                        if ext in ['.docx', '.xlsx', '.pptx', '.pub']:
+                            return self.create_office_shellnew_entry(ext, shellnew_path)
+                        else:
+                            return self.create_basic_shellnew_entry(ext, shellnew_path)
+                    except Exception as e:
+                        raise Exception(f"Не удалось создать ключ для {ext}: {e}")
 
-        except:
+        except Exception as e:
+            print(f"Ошибка в enable_new_menu_item для {ext}: {e}")
+            return False
+
+    def disable_new_menu_item(self, ext, base_path=None):
+        """Отключение пункта в меню Создать (HKLM)"""
+        try:
+            if base_path is None:
+                base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
+
+            shellnew_path = base_path
+            shellnew_no_path = base_path + '_no'
+
+            # Проверяем, существует ли уже отключенная версия
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
+                    # Уже отключено
+                    return True
+            except FileNotFoundError:
+                pass
+
+            # Пытаемся переименовать обычный ключ в _no
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
+                    if self.rename_registry_key(winreg.HKEY_LOCAL_MACHINE, shellnew_path, shellnew_no_path):
+                        return True
+                    else:
+                        raise Exception(f"Не удалось переименовать ключ для {ext}")
+            except FileNotFoundError:
+                # Если ключа нет, значит он уже отключен или не существует
+                return True
+
+        except Exception as e:
+            print(f"Ошибка в disable_new_menu_item для {ext}: {e}")
             return False
 
     def create_office_shellnew_entry(self, ext, shellnew_path):
@@ -2875,25 +3080,31 @@ class Module:
             except:
                 return False
 
-    def disable_new_menu_item(self, ext, base_path=None):
-        """Отключение пункта в меню Создать (HKLM)"""
+    def create_basic_shellnew_entry(self, ext, shellnew_path):
+        """Создание базовой записи ShellNew"""
         try:
-            if base_path is None:
-                base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
+            winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path)
 
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path, 0, winreg.KEY_SET_VALUE) as key:
+                # Для разных типов файлов разные параметры
+                if ext == '.bmp':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                elif ext == '.txt':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                elif ext == '.rtf':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                elif ext == '.lnk':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                elif ext == '.contact':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                elif ext == '.zip':
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
+                else:
+                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
 
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                    if self.rename_registry_key(winreg.HKEY_LOCAL_MACHINE, shellnew_path, shellnew_no_path):
-                        return True
-                    else:
-                        return False
-            except FileNotFoundError:
-                return True
-
-        except:
+            return True
+        except Exception as e:
+            print(f"Ошибка создания базового ShellNew для {ext}: {e}")
             return False
 
     def create_sendto_menu_tab(self, parent):

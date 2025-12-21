@@ -21,6 +21,9 @@ class ExplorerModule:
         self.checkbox_vars = {}
         self.bitlocker_enabled = False
 
+        # Для хранения индикаторов состояния
+        self.status_labels = {}
+
         self.content_frame = ttk.Frame(self.frame)
         self.content_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -84,6 +87,7 @@ class ExplorerModule:
             var = tk.BooleanVar()
             self.checkbox_vars[guid] = var
 
+            # Создаем чекбокс
             checkbox = ttk.Checkbutton(
                 frame,
                 text=name,
@@ -93,13 +97,24 @@ class ExplorerModule:
             )
             checkbox.pack(side=tk.LEFT, anchor=tk.W)
 
+            # Создаем индикатор состояния
+            status_label = ttk.Label(
+                frame,
+                text="•",
+                font=('Arial', 9, 'bold'),
+                width=2
+            )
+            status_label.pack(side=tk.LEFT, padx=(2, 0))
+            self.status_labels[guid] = status_label
+
+            # Описание папки
             desc_label = ttk.Label(
                 frame,
                 text=f" - {description}",
                 font=('Arial', 9),
                 foreground='#95a5a6'
             )
-            desc_label.pack(side=tk.LEFT, padx=(8, 0))
+            desc_label.pack(side=tk.LEFT, padx=(0, 8))
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -183,7 +198,7 @@ class ExplorerModule:
         self.bitlocker_button.pack()
 
     def check_current_state(self):
-        """Проверяет текущее состояние папок в реестре"""
+        """Проверяет текущее состояние папок в реестре и обновляет индикаторы"""
         base_key = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace"
 
         for guid in self.folders.keys():
@@ -198,11 +213,26 @@ class ExplorerModule:
 
                 if result.returncode == 0:
                     self.checkbox_vars[guid].set(True)
+                    # Обновляем индикатор - галочка (включено)
+                    self.status_labels[guid].config(
+                        text="✓",
+                        foreground='#27ae60'  # Зеленый цвет
+                    )
                 else:
                     self.checkbox_vars[guid].set(False)
+                    # Обновляем индикатор - крестик (выключено)
+                    self.status_labels[guid].config(
+                        text="✗",
+                        foreground='#e74c3c'  # Красный цвет
+                    )
 
             except Exception:
                 self.checkbox_vars[guid].set(False)
+                # В случае ошибки - крестик
+                self.status_labels[guid].config(
+                    text="✗",
+                    foreground='#e74c3c'
+                )
 
     def check_bitlocker_state(self):
         """Проверяет текущее состояние BitLocker в реестре"""
@@ -246,35 +276,18 @@ class ExplorerModule:
             self.bitlocker_button.config(text="Ошибка проверки")
 
     def apply_folder_changes(self):
-        """Применяет выбранные изменения для папок в реестре"""
+        """Применяет выбранные изменения для папок в реестре и сразу обновляет индикаторы"""
         base_key = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace"
 
-        # Просто применяем изменения без дополнительных сообщений
+        # Применяем изменения и сразу обновляем индикаторы
         for guid, var in self.checkbox_vars.items():
-            current_state = var.get()
+            desired_state = var.get()
             reg_path = f"{base_key}\\{guid}"
 
             try:
-                check_result = subprocess.run(
-                    ['reg', 'query', reg_path],
-                    capture_output=True,
-                    text=True,
-                    encoding='cp866',
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-
-                key_exists = check_result.returncode == 0
-
-                if not current_state and key_exists:
-                    subprocess.run(
-                        ['reg', 'delete', reg_path, '/f'],
-                        capture_output=True,
-                        text=True,
-                        encoding='cp866',
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-
-                elif current_state and not key_exists:
+                # Применяем изменения в реестре
+                if desired_state:
+                    # Включаем папку - добавляем ключ в реестр
                     subprocess.run(
                         ['reg', 'add', reg_path, '/f'],
                         capture_output=True,
@@ -282,9 +295,38 @@ class ExplorerModule:
                         encoding='cp866',
                         creationflags=subprocess.CREATE_NO_WINDOW
                     )
+                    # Сразу обновляем индикатор на галочку (зеленый)
+                    self.status_labels[guid].config(
+                        text="✓",
+                        foreground='#27ae60'
+                    )
+                else:
+                    # Выключаем папку - удаляем ключ из реестра
+                    subprocess.run(
+                        ['reg', 'delete', reg_path, '/f'],
+                        capture_output=True,
+                        text=True,
+                        encoding='cp866',
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    # Сразу обновляем индикатор на крестик (красный)
+                    self.status_labels[guid].config(
+                        text="✗",
+                        foreground='#e74c3c'
+                    )
 
             except Exception:
-                pass
+                # В случае ошибки при применении, показываем текущее состояние чекбокса
+                if desired_state:
+                    self.status_labels[guid].config(
+                        text="✓",
+                        foreground='#27ae60'
+                    )
+                else:
+                    self.status_labels[guid].config(
+                        text="✗",
+                        foreground='#e74c3c'
+                    )
 
     def toggle_bitlocker(self):
         """Переключает состояние BitLocker"""
@@ -328,13 +370,15 @@ class ExplorerModule:
 
     def select_all(self):
         """Выбрать все папки"""
-        for var in self.checkbox_vars.values():
+        for guid, var in self.checkbox_vars.items():
             var.set(True)
+            # Не меняем индикатор, только чекбокс
 
     def deselect_all(self):
         """Снять выделение со всех папок"""
-        for var in self.checkbox_vars.values():
+        for guid, var in self.checkbox_vars.items():
             var.set(False)
+            # Не меняем индикатор, только чекбокс
 
     def show(self):
         """Показать модуль"""

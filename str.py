@@ -239,7 +239,7 @@ class Module:
             self._clear_icon_cache()
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр. Запустите программу от имени администратора.")
+            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {str(e)}")
 

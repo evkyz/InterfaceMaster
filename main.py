@@ -542,7 +542,7 @@ class InterfaceMaster:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v1.1 (Beta 1)")
+        self.root.title("Interface Master v1.1 (Beta 2)")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -567,7 +567,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "1.1.0.115 beta 1"
+        self.version = "1.1.0.116 beta 2"
 
         self.logo_image = None
         self.logo_photo = None

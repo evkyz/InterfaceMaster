@@ -240,100 +240,102 @@ class Module:
         title_label = ttk.Label(
             self.frame,
             text="Настройка Панели задач",
-            font=('Arial', 16, 'bold'),
+            font=('Arial', 14, 'bold'),
             foreground='#2c3e50'
         )
-        title_label.pack(pady=10)
+        title_label.pack(pady=5)
 
         desc_label = ttk.Label(
             self.frame,
             text="Настройте внешний вид и функциональность панели задач Windows",
-            font=('Arial', 10),
+            font=('Arial', 9),
             foreground='#7f8c8d'
         )
-        desc_label.pack(pady=(0, 20))
+        desc_label.pack(pady=(0, 10))
 
-        settings_frame = ttk.LabelFrame(self.frame, text="Доступные настройки", padding=15)
-        settings_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        settings_frame = ttk.LabelFrame(self.frame, text="Доступные настройки", padding=10)
+        settings_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
 
-        # Кнопка для дня недели
-        weekday_state = self.check_weekday_state()
-        self.toggle_weekday_button = ttk.Button(
+        # 1. Кнопка для группировки кнопок (3 состояния) - ПЕРВАЯ
+        grouping_state = self.check_grouping_state()
+        grouping_texts = {0: " (Всегда)", 1: " (При заполнении)", 2: " (Никогда)"}
+        self.toggle_grouping_button = ttk.Button(
             settings_frame,
-            text="Добавить/Убрать день недели в дате" + (" (Показано)" if weekday_state else " (Скрыто)"),
-            command=lambda: self.toggle_weekday_with_update(),
-            width=45
+            text="Изменить группировку кнопок" + grouping_texts[grouping_state],
+            command=lambda: self.toggle_grouping_with_update(),
+            width=40
         )
-        self.toggle_weekday_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.toggle_weekday_button, "Добавляет или убирает отображение дня недели в системной дате")
+        self.toggle_grouping_button.pack(pady=5, fill=tk.X)
+        self.create_tooltip(self.toggle_grouping_button,
+                            "Циклически переключает: Всегда → При заполнении → Никогда → Всегда...")
 
-        # Кнопка для Центра уведомлений
-        notification_state = self.check_notification_center_state()
-        self.toggle_notification_center_button = ttk.Button(
-            settings_frame,
-            text="Добавить/Убрать Центр уведомлений" + (" (Показано)" if not notification_state else " (Скрыто)"),
-            command=lambda: self.toggle_notification_center_with_update(),
-            width=45
-        )
-        self.toggle_notification_center_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.toggle_notification_center_button, "Включает или отключает Центр уведомлений Windows")
-
-        # Кнопка для размера значков (особый случай)
+        # 2. Кнопка для размера значков (особый случай) - ВТОРАЯ
         taskbar_size_state = self.check_taskbar_size_state()
         self.toggle_taskbar_size_button = ttk.Button(
             settings_frame,
-            text="Переключить размер значков панели задач" + (" (маленькие)" if taskbar_size_state else " (большие)"),
+            text="Переключить размер значков панели задач" + (" (Маленькие)" if taskbar_size_state else " (Большие)"),
             command=lambda: self.toggle_taskbar_size_with_update(),
-            width=45
+            width=40
         )
-        self.toggle_taskbar_size_button.pack(pady=8, fill=tk.X)
+        self.toggle_taskbar_size_button.pack(pady=5, fill=tk.X)
         self.create_tooltip(self.toggle_taskbar_size_button,
                             "Переключает между большими и маленькими значками на панели задач")
 
-        # Кнопка для Поиска (3 состояния)
+        # 3. Кнопка для Поиска (3 состояния) - ТРЕТЬЯ
         search_state = self.check_search_state()
         search_texts = {0: " (Скрыто)", 1: " (Значок)", 2: " (Поле)"}
         self.toggle_search_button = ttk.Button(
             settings_frame,
             text="Скрыть/Показать Поиск" + search_texts[search_state],
             command=lambda: self.toggle_search_with_update(),
-            width=45
+            width=40
         )
-        self.toggle_search_button.pack(pady=8, fill=tk.X)
+        self.toggle_search_button.pack(pady=5, fill=tk.X)
         self.create_tooltip(self.toggle_search_button, "Циклически переключает: Поле → Значок → Скрыто → Поле...")
 
-        # Кнопка для Люди
-        people_state = self.check_people_state()
-        self.toggle_people_button = ttk.Button(
-            settings_frame,
-            text="Скрыть/Показать Люди" + (" (Показано)" if not people_state else " (Скрыто)"),
-            command=lambda: self.toggle_people_with_update(),
-            width=45
-        )
-        self.toggle_people_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.toggle_people_button, "Скрывает или показывает кнопку 'Люди' на панели задач")
-
-        # Кнопка для Просмотр задач
+        # 4. Кнопка для Просмотр задач - ЧЕТВЕРТАЯ
         task_view_state = self.check_task_view_state()
         self.toggle_task_view_button = ttk.Button(
             settings_frame,
             text="Скрыть/Показать Просмотр задач" + (" (Показано)" if not task_view_state else " (Скрыто)"),
             command=lambda: self.toggle_task_view_with_update(),
-            width=45
+            width=40
         )
-        self.toggle_task_view_button.pack(pady=8, fill=tk.X)
+        self.toggle_task_view_button.pack(pady=5, fill=tk.X)
         self.create_tooltip(self.toggle_task_view_button,
                             "Скрывает или показывает кнопку 'Просмотр задач' на панели задач")
 
-        # Кнопка для Провести собрание
+        # 5. Кнопка для Люди - ПЯТАЯ
+        people_state = self.check_people_state()
+        self.toggle_people_button = ttk.Button(
+            settings_frame,
+            text="Скрыть/Показать Люди" + (" (Показано)" if not people_state else " (Скрыто)"),
+            command=lambda: self.toggle_people_with_update(),
+            width=40
+        )
+        self.toggle_people_button.pack(pady=5, fill=tk.X)
+        self.create_tooltip(self.toggle_people_button, "Скрывает или показывает кнопку 'Люди' на панели задач")
+
+        # 6. Кнопка для Центра уведомлений - ШЕСТАЯ
+        notification_state = self.check_notification_center_state()
+        self.toggle_notification_center_button = ttk.Button(
+            settings_frame,
+            text="Добавить/Убрать Центр уведомлений" + (" (Показано)" if not notification_state else " (Скрыто)"),
+            command=lambda: self.toggle_notification_center_with_update(),
+            width=40
+        )
+        self.toggle_notification_center_button.pack(pady=5, fill=tk.X)
+        self.create_tooltip(self.toggle_notification_center_button, "Включает или отключает Центр уведомлений Windows")
+
+        # 7. Кнопка для Провести собрание - СЕДЬМАЯ
         meet_now_state = self.check_meet_now_state() if self.is_windows_version_supported() else False
         self.toggle_meet_now_button = ttk.Button(
             settings_frame,
             text="Скрыть/Показать Провести собрание" + (" (Показано)" if not meet_now_state else " (Скрыто)"),
             command=lambda: self.toggle_meet_now_with_update(),
-            width=45
+            width=40
         )
-        self.toggle_meet_now_button.pack(pady=8, fill=tk.X)
+        self.toggle_meet_now_button.pack(pady=5, fill=tk.X)
 
         # Проверяем версию Windows и активируем/деактивируем кнопку
         if self.is_windows_version_supported():
@@ -344,47 +346,37 @@ class Module:
             self.create_tooltip(self.toggle_meet_now_button,
                                 "Эта функция доступна только в Windows 21H2 (19044) и выше")
 
-        # Кнопка для группировки кнопок (3 состояния)
-        grouping_state = self.check_grouping_state()
-        grouping_texts = {0: " (Всегда)", 1: " (При заполнении)", 2: " (Никогда)"}
-        self.toggle_grouping_button = ttk.Button(
+        # 8. Кнопка для дня недели - ПОСЛЕДНЯЯ
+        weekday_state = self.check_weekday_state()
+        self.toggle_weekday_button = ttk.Button(
             settings_frame,
-            text="Изменить группировку кнопок" + grouping_texts[grouping_state],
-            command=lambda: self.toggle_grouping_with_update(),
-            width=45
+            text="Добавить/Убрать день недели в дате" + (" (Показано)" if weekday_state else " (Скрыто)"),
+            command=lambda: self.toggle_weekday_with_update(),
+            width=40
         )
-        self.toggle_grouping_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.toggle_grouping_button,
-                            "Циклически переключает: Всегда → При заполнении → Никогда → Всегда...")
+        self.toggle_weekday_button.pack(pady=5, fill=tk.X)
+        self.create_tooltip(self.toggle_weekday_button, "Добавляет или убирает отображение дня недели в системной дате")
 
         extra_frame = ttk.Frame(settings_frame)
-        extra_frame.pack(fill=tk.X, pady=15)
+        extra_frame.pack(fill=tk.X, pady=10)
 
         restart_explorer_btn = ttk.Button(
             extra_frame,
             text="Перезапустить Проводник",
             command=self.restart_explorer,
-            width=20
+            width=18
         )
         restart_explorer_btn.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        self.create_tooltip(restart_explorer_btn, "Немедленно перезагружает Проводник Windows для применения изменений")
+        self.create_tooltip(restart_explorer_btn, "Перезагружает Проводник Windows для применения изменений")
 
         reset_all_btn = ttk.Button(
             extra_frame,
             text="Сбросить все настройки",
             command=self.reset_all_settings,
-            width=20
+            width=18
         )
         reset_all_btn.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
         self.create_tooltip(reset_all_btn, "Сбрасывает все настройки панели задач к значениям по умолчанию")
-
-        info_label = ttk.Label(
-            settings_frame,
-            font=('Arial', 8),
-            foreground='#e67e22',
-            justify=tk.CENTER
-        )
-        info_label.pack(pady=10)
 
     # Оберточные функции для обновления текста кнопок после выполнения
     def toggle_weekday_with_update(self):
@@ -774,8 +766,8 @@ class Module:
                  'REG_DWORD'],
                 ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', 'ShowTaskViewButton', '1',
                  'REG_DWORD'],
-                ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', 'TaskbarGlomLevel', '1',
-                 'REG_DWORD'],  # При заполнении по умолчанию
+                ['HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced', 'TaskbarGlomLevel', '0',
+                 'REG_DWORD'],
             ]
 
             notification_center_settings = [
@@ -848,14 +840,10 @@ class Module:
 
     def update_all_button_texts(self):
         """Обновляет тексты всех кнопок после сброса настроек"""
-        # День недели
-        weekday_state = self.check_weekday_state()
-        self.update_button_text(self.toggle_weekday_button, "Добавить/Убрать день недели в дате", weekday_state)
-
-        # Центр уведомлений
-        notification_state = self.check_notification_center_state()
-        self.update_button_text(self.toggle_notification_center_button, "Добавить/Убрать Центр уведомлений",
-                                not notification_state)
+        # Группировка кнопок
+        grouping_state = self.check_grouping_state()
+        self.update_button_text(self.toggle_grouping_button, "Изменить группировку кнопок", grouping_state,
+                                is_grouping=True)
 
         # Размер значков
         taskbar_size_state = self.check_taskbar_size_state()
@@ -866,13 +854,18 @@ class Module:
         search_state = self.check_search_state()
         self.update_button_text(self.toggle_search_button, "Скрыть/Показать Поиск", search_state, is_search=True)
 
+        # Просмотр задач
+        task_view_state = self.check_task_view_state()
+        self.update_button_text(self.toggle_task_view_button, "Скрыть/Показать Просмотр задач", not task_view_state)
+
         # Люди
         people_state = self.check_people_state()
         self.update_button_text(self.toggle_people_button, "Скрыть/Показать Люди", not people_state)
 
-        # Просмотр задач
-        task_view_state = self.check_task_view_state()
-        self.update_button_text(self.toggle_task_view_button, "Скрыть/Показать Просмотр задач", not task_view_state)
+        # Центр уведомлений
+        notification_state = self.check_notification_center_state()
+        self.update_button_text(self.toggle_notification_center_button, "Добавить/Убрать Центр уведомлений",
+                                not notification_state)
 
         # Провести собрание
         if self.is_windows_version_supported():
@@ -880,14 +873,13 @@ class Module:
             self.update_button_text(self.toggle_meet_now_button, "Скрыть/Показать Провести собрание",
                                     not meet_now_state)
 
-        # Группировка кнопок
-        grouping_state = self.check_grouping_state()
-        self.update_button_text(self.toggle_grouping_button, "Изменить группировку кнопок", grouping_state,
-                                is_grouping=True)
+        # День недели
+        weekday_state = self.check_weekday_state()
+        self.update_button_text(self.toggle_weekday_button, "Добавить/Убрать день недели в дате", weekday_state)
 
     def show(self):
         """Показать модуль"""
-        self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
     def hide(self):
         """Скрыть модуль"""

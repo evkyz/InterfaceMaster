@@ -1,7 +1,6 @@
 import ctypes
 import ctypes.wintypes
 import subprocess
-import sys
 import tkinter as tk
 import winreg
 from tkinter import ttk, messagebox
@@ -352,7 +351,6 @@ class Module:
                 full_value = icon_value
             else:
                 if not self.dll_path:
-                    # Не показываем сообщение здесь - оно уже было показано при загрузке модуля
                     return False
                 full_value = f"{self.dll_path},{icon_value}"
 
@@ -407,17 +405,13 @@ class Module:
 
     def apply_icon_set(self):
         """Применение выбранного набора иконок"""
-        # Проверка наличия DLL (уже проверялось при загрузке, но проверяем на всякий случай)
         if not self.dll_path:
-            # Не показываем сообщение - оно уже было показано при загрузке модуля
             return
 
         selected_set = self.icon_set_var.get()
-        # Не проверяем выбор набора - он всегда есть по умолчанию "Windows 95"
 
         icon_set = self.ICON_SETS.get(selected_set)
         if not icon_set:
-            # Эта проверка остаётся на случай ошибки в данных
             messagebox.showerror("Ошибка", "Неверный набор иконок.")
             return
 
@@ -448,7 +442,7 @@ class Module:
 
             message_text = f"Набор иконок '{selected_set}' успешно применён!"
             if selected_set == "Windows XP" and self.checkbox_var.get():
-                message_text += " Применены иконки корзины от Whistler."
+                message_text += " Применены иконки корзины от Whistler"
 
             self.show_message(message_text, "success")
 

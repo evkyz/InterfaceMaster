@@ -3,8 +3,6 @@ from tkinter import ttk, messagebox
 import hashlib
 import os
 import subprocess
-
-# Вместо from tkinter import filedialog, используем:
 import tkinter.filedialog as filedialog
 
 
@@ -309,13 +307,13 @@ class Module:
                     file_hash = hashlib.sha256(file_content).hexdigest().lower()
 
                 if file_hash == expected_hash.lower():
-                    self.log_to_file(f"Файл {filename} соответствует эталонному хешу.")
+                    self.log_to_file(f"Файл {filename} соответствует эталонному хешу")
                 else:
                     all_files_match = False
-                    self.log_to_file(f"Файл {filename} НЕ соответствует эталонному хешу.")
+                    self.log_to_file(f"Файл {filename} не соответствует эталонному хешу")
             else:
                 all_files_exist = False
-                self.log_to_file(f"Файл {filename} не найден.")
+                self.log_to_file(f"Файл {filename} не найден")
 
         # Общий результат
         if all_files_exist and all_files_match:
@@ -360,7 +358,7 @@ class Module:
         files_to_process = [filename for filename, var in self.file_vars.items() if var.get()]
 
         if not files_to_process:
-            messagebox.showwarning("Предупреждение", "Не выбраны файлы для восстановления.")
+            messagebox.showwarning("Предупреждение", "Не выбраны файлы для восстановления")
             return
 
         # Проверяем, что выбранные файлы действительно нуждаются в восстановлении
@@ -371,7 +369,7 @@ class Module:
                 files_need_restore.append(filename)
 
         if not files_need_restore:
-            messagebox.showinfo("Информация", "Выбранные файлы уже являются оригинальными и не требуют восстановления.")
+            messagebox.showinfo("Информация", "Выбранные файлы уже являются оригинальными и не требуют восстановления")
             return
 
         # Завершение explorer.exe
@@ -390,7 +388,7 @@ class Module:
                 try:
                     # Попытка удаления файла
                     subprocess.run(f'del "{file_path}" >nul 2>&1', shell=True, check=True)
-                    self.log_to_file(f"Файл {filename} успешно удален.")
+                    self.log_to_file(f"Файл {filename} успешно удален")
                 except Exception as e:
                     self.log_to_file(f"Не удалось удалить файл {filename}. Переименовываем его...")
                     # Переименование в .dll_mod
@@ -401,7 +399,7 @@ class Module:
                         # Попытка повторного удаления
                         try:
                             subprocess.run(f'del "{mod_file_path}" >nul 2>&1', shell=True, check=True)
-                            self.log_to_file(f"Файл {os.path.basename(mod_file_path)} успешно удален.")
+                            self.log_to_file(f"Файл {os.path.basename(mod_file_path)} успешно удален")
                         except Exception as e:
                             self.log_to_file(
                                 f"Не удалось удалить временный файл {os.path.basename(mod_file_path)}. Пропускаем...")
@@ -413,7 +411,7 @@ class Module:
             if os.path.exists(orig_file_path):
                 try:
                     os.rename(orig_file_path, file_path)
-                    self.log_to_file(f"Оригинальный файл {filename} успешно восстановлен.")
+                    self.log_to_file(f"Оригинальный файл {filename} успешно восстановлен")
                     restored_count += 1
                 except Exception as e:
                     self.log_to_file(f"Ошибка при восстановлении файла {filename}: {e}")
@@ -422,12 +420,12 @@ class Module:
                         existing_file_path = f"{file_path}_mod"
                         try:
                             os.rename(file_path, existing_file_path)
-                            self.log_to_file(f"Файл {filename} переименован в {os.path.basename(existing_file_path)}.")
+                            self.log_to_file(f"Файл {filename} переименован в {os.path.basename(existing_file_path)}")
                             # Повторная попытка восстановления
                             try:
                                 os.rename(orig_file_path, file_path)
                                 self.log_to_file(
-                                    f"Оригинальный файл {filename} успешно восстановлен после переименования.")
+                                    f"Оригинальный файл {filename} успешно восстановлен после переименования")
                                 restored_count += 1
                             except Exception as e:
                                 self.log_to_file(f"Ошибка при повторной попытке восстановления файла {filename}: {e}")
@@ -439,7 +437,7 @@ class Module:
             if os.path.exists(acl_file):
                 try:
                     subprocess.run(f'icacls "{file_path}" /restore "{acl_file}" >nul 2>&1', shell=True, check=True)
-                    self.log_to_file(f"Права доступа для {filename} успешно восстановлены.")
+                    self.log_to_file(f"Права доступа для {filename} успешно восстановлены")
                 except Exception as e:
                     self.log_to_file(f"Ошибка при восстановлении прав доступа для {filename}: {e}")
 
@@ -461,14 +459,14 @@ class Module:
     def start_modification(self):
         """Запускает процесс модификации."""
         if not self.selected_folder:
-            messagebox.showerror("Ошибка", "Выберите папку с модифицированными файлами.")
+            messagebox.showerror("Ошибка", "Выберите папку с модифицированными файлами")
             return
 
         # Получаем список файлов для модификации на основе выбранных чекбоксов
         files_to_process = [filename for filename, var in self.file_vars.items() if var.get()]
 
         if not files_to_process:
-            messagebox.showwarning("Предупреждение", "Не выбраны файлы для модификации.")
+            messagebox.showwarning("Предупреждение", "Не выбраны файлы для модификации")
             return
 
         # Проверяем, что выбранные файлы действительно нуждаются в модификации
@@ -480,7 +478,7 @@ class Module:
 
         if not files_need_modification:
             messagebox.showinfo("Информация",
-                                "Выбранные файлы уже соответствуют эталонным хешам и не требуют модификации.")
+                                "Выбранные файлы уже соответствуют эталонным хешам и не требуют модификации")
             return
 
         # Проверка наличия всех необходимых файлов в выбранной папке
@@ -519,11 +517,11 @@ class Module:
                 backup_file = f"{target_file}_orig"
                 if os.path.exists(target_file):
                     os.rename(target_file, backup_file)
-                    self.log_to_file(f"Оригинальный файл {filename} переименован в {os.path.basename(backup_file)}.")
+                    self.log_to_file(f"Оригинальный файл {filename} переименован в {os.path.basename(backup_file)}")
 
                 # Копируем новый файл
                 subprocess.run(f'copy "{source_file}" "{target_file}" >nul 2>&1', shell=True, check=True)
-                self.log_to_file(f"Файл {filename} успешно заменён.")
+                self.log_to_file(f"Файл {filename} успешно заменён")
                 modified_count += 1
 
                 # Восстанавливаем права доступа
@@ -553,7 +551,7 @@ class Module:
         # Создание нового окна
         hash_window = tk.Toplevel(self.parent)
         hash_window.title("Хеш-суммы файлов")
-        hash_window.geometry("900x210")  # Увеличил ширину окна
+        hash_window.geometry("840x200")
         hash_window.resizable(False, False)
 
         # Главный фрейм
@@ -590,7 +588,7 @@ class Module:
                         file_hash = hashlib.sha256(file_content).hexdigest().upper()
                     is_match = file_hash == expected_hash.upper()
 
-                    status_text = "✓ Соответствует" if is_match else "✗ Не соответствует"
+                    status_text = "✓ Модифицирован" if is_match else "✗ Оригинал"
                     status_color = "green" if is_match else "red"
 
                     # Название файла
@@ -626,7 +624,7 @@ class Module:
 
                 # Статус
                 status_label = ttk.Label(row_frame, text="✗ Ошибка", foreground="red",
-                                         font=("Arial", 9), width=20, anchor="w")  # Увеличил ширину
+                                         font=("Arial", 9), width=20, anchor="w")
                 status_label.pack(side=tk.LEFT, padx=(0, 10))
 
                 # Сообщение об ошибке

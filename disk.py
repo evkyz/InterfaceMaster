@@ -2,7 +2,7 @@ import os
 import string
 import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 
 try:
     from main import DLLChecker
@@ -83,7 +83,6 @@ class Module:
 
     def get_dll_path(self):
         if not HAS_DLL_CHECKER:
-            # Не показываем сообщение - в main уже есть проверка
             return None
 
         dll_path = DLLChecker.get_dll_path_for_module(self.parent, self.module_name)
@@ -245,7 +244,6 @@ class Module:
                     self.show_message(f"Иконка для диска {selected_disk} установлена", "success")
 
                 except subprocess.CalledProcessError:
-                    # Не показываем сообщение об ошибке
                     pass
 
     def remove_icon(self):
@@ -270,7 +268,6 @@ class Module:
                     self.show_message(f"Иконка для диска {selected_disk} удалена", "success")
 
                 except subprocess.CalledProcessError:
-                    # Не показываем сообщение об ошибке
                     pass
 
     def remove_all_icons(self):
@@ -290,7 +287,6 @@ class Module:
             self.show_message("Все иконки дисков удалены", "success")
 
         except subprocess.CalledProcessError:
-            # Не показываем сообщение об ошибке
             pass
 
     def show(self):

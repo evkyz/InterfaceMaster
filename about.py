@@ -70,8 +70,8 @@ class AboutModule:
         )
         desc_frame.pack(fill=tk.X, pady=(0, 10))
 
-        desc_text = """Программа для настройки интерфейса Windows.
-Помощник в кастомизации внешнего вида системы."""
+        desc_text = """Программа для настройки интерфейса Windows
+Помощник в кастомизации внешнего вида системы"""
 
         desc_label = ttk.Label(
             desc_frame,
@@ -119,7 +119,7 @@ class AboutModule:
 
         dev_text = f"""Идея: EvKyz
 Реализация: DeepSeek AI
-Сборка: 22 декабря 2025
+Сборка: 23 декабря 2025
 Лицензия: MIT License"""
 
         dev_label = ttk.Label(

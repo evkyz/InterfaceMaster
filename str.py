@@ -79,7 +79,7 @@ class Module:
 
         self.no_arrow_check = ttk.Radiobutton(
             settings_frame,
-            text="Убрать стрелки полностью",
+            text="Убрать стрелки",
             variable=self.arrow_choice,
             value=3
         )
@@ -239,7 +239,7 @@ class Module:
             self._clear_icon_cache()
 
         except subprocess.CalledProcessError:
-            messagebox.showerror("Ошибка", "Не удалось изменить реестр")
+            messagebox.showerror("Ошибка", "Не удалось изменить")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {str(e)}")
 
@@ -255,10 +255,10 @@ class Module:
             subprocess.Popen('explorer.exe', shell=True,
                              creationflags=subprocess.CREATE_NO_WINDOW)
 
-            self.show_status("✓ Проводник успешно перезагружен")
+            self.show_status("✓ Проводник успешно перезапущен")
 
         except Exception:
-            messagebox.showerror("Ошибка", "Не удалось перезагрузить Проводник")
+            messagebox.showerror("Ошибка", "Не удалось перезапустить Проводник")
 
     def show_status(self, message, is_success=True):
         """Показать статус операции"""

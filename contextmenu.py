@@ -221,7 +221,7 @@ class Module:
             },
             {
                 "name": "Диспетчер задач",
-                "add_tooltip": "Контекстное меню Рабочего стола",
+                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_task_manager,
                 "remove_command": self.remove_task_manager,
@@ -231,7 +231,7 @@ class Module:
             },
             {
                 "name": "Перезапустить explorer",
-                "add_tooltip": "Контекстное меню Рабочего стола",
+                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_restart_explorer,
                 "remove_command": self.remove_restart_explorer,
@@ -241,7 +241,7 @@ class Module:
             },
             {
                 "name": "Редактор реестра",
-                "add_tooltip": "Контекстное меню Рабочего стола",
+                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_regedit,
                 "remove_command": self.remove_regedit,
@@ -251,7 +251,7 @@ class Module:
             },
             {
                 "name": "Выключение/Перезагрузка/Гибернация",
-                "add_tooltip": "Контекстное меню Рабочего стола",
+                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_power_menu,
                 "remove_command": self.remove_power_menu,
@@ -261,7 +261,7 @@ class Module:
             },
             {
                 "name": "Администрирование",
-                "add_tooltip": "Контекстное меню Компьютер",
+                "add_tooltip": "Добавить в контекстное меню Компьютер",
                 "remove_tooltip": "Контекстное меню Компьютер",
                 "add_command": self.add_admin_menu,
                 "remove_command": self.remove_admin_menu,
@@ -271,7 +271,7 @@ class Module:
             },
             {
                 "name": "Система",
-                "add_tooltip": "Контекстное меню Компьютер",
+                "add_tooltip": "Добавить в контекстное меню Компьютер",
                 "remove_tooltip": "Контекстное меню Компьютер",
                 "add_command": self.add_system_menu,
                 "remove_command": self.remove_system_menu,
@@ -1443,6 +1443,18 @@ class Module:
 
             elif item_type == "modern_sharing":
                 try:
+                    # Сначала проверяем, не заблокировано ли расширение
+                    blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path) as key:
+                            try:
+                                winreg.QueryValueEx(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}")
+                                return False  # Заблокировано
+                            except FileNotFoundError:
+                                pass
+                    except FileNotFoundError:
+                        pass
+                    # Затем проверяем наличие хотя бы одного из ключей ModernSharing
                     modern_sharing_paths = [
                         r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                         r'SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\ModernSharing',
@@ -1450,7 +1462,6 @@ class Module:
                         r'SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\ModernSharing',
                         r'SOFTWARE\Classes\Directory\Background\shellex\ContextMenuHandlers\ModernSharing'
                     ]
-
                     for path in modern_sharing_paths:
                         try:
                             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
@@ -1459,9 +1470,7 @@ class Module:
                                     return True
                         except:
                             continue
-
                     return False
-
                 except FileNotFoundError:
                     return False
                 except:
@@ -1936,6 +1945,16 @@ class Module:
     def add_modern_sharing(self):
         """Добавление современного меню отправки (Metro)"""
         try:
+            blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path, 0, winreg.KEY_SET_VALUE) as key:
+                    try:
+                        winreg.DeleteValue(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}")
+                    except FileNotFoundError:
+                        pass
+            except FileNotFoundError:
+                pass
+
             modern_sharing_paths = [
                 (r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                  '{e2bf9676-5f8f-435c-97eb-11607a5bedf7}'),
@@ -1951,15 +1970,26 @@ class Module:
 
             for key_path, clsid_value in modern_sharing_paths:
                 try:
+                    try:
+                        # Сначала удаляем ключ, если он существует
+                        winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                    except FileNotFoundError:
+                        pass
+
+                    # Создаем новый ключ
                     winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
 
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHine, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
                         winreg.SetValueEx(key, "", 0, winreg.REG_SZ, clsid_value)
 
                 except PermissionError as pe:
                     if self.take_ownership_registry_key_simple(key_path):
                         if self.set_registry_key_permissions_simple(key_path):
                             try:
+                                try:
+                                    winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                                except:
+                                    pass
                                 winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
                                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0,
                                                     winreg.KEY_SET_VALUE) as key:
@@ -1968,15 +1998,25 @@ class Module:
                                 pass
                 except:
                     pass
-
             self.update_menu_items_status()
-
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {str(e)}")
+            pass
 
     def remove_modern_sharing(self):
         """Удаление современного меню отправки (Metro)"""
         try:
+            # Добавляем в список заблокированных расширений
+            blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
+            try:
+                winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, blocked_path)
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path, 0,
+                                    winreg.KEY_SET_VALUE) as key:
+                    winreg.SetValueEx(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}", 0,
+                                      winreg.REG_SZ, "Отправить (metro)")
+            except:
+                pass
+
+            # Удаляем все пути ModernSharing
             modern_sharing_paths = [
                 r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                 r'SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\ModernSharing',
@@ -2000,14 +2040,11 @@ class Module:
                                     pass
                     except:
                         pass
-
                 except:
                     pass
-
             self.update_menu_items_status()
-
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
+            pass
 
     def add_delete_folder_content(self):
         """Добавление удаления содержимого папки (HKLM)"""
@@ -2553,7 +2590,6 @@ class Module:
         """Получение списка пунктов меню Создать (используем HKLM)"""
         items = []
         try:
-            # Добавляем пункт "Папка" в начало списка
             folder_ext = '.folder'  # Виртуальное расширение для папки
             folder_path = r'Folder\ShellNew'
 

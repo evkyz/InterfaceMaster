@@ -1,7 +1,6 @@
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sys
 
 
 class Module:
@@ -15,7 +14,6 @@ class Module:
     def get_windows_version(self):
         """Получает версию Windows"""
         try:
-            # Используем более надежный способ получения версии Windows
             result = subprocess.run(
                 ['wmic', 'os', 'get', 'Version', '/value'],
                 capture_output=True,
@@ -44,13 +42,13 @@ class Module:
             return "10.0.0"
 
     def is_windows_version_supported(self):
-        """Проверяет, поддерживается ли функция Провести собрание (Windows 21H2 и выше)"""
+        """Проверяет, поддерживается ли функция Провести собрание (Windows 10 21H2 и выше)"""
         try:
             # Получаем номер сборки из версии
             version_parts = self.windows_version.split('.')
             if len(version_parts) >= 3:
                 build_number = int(version_parts[2])
-                # Windows 21H2 имеет номер сборки 19044 и выше
+                # Windows 10 21H2 имеет номер сборки 19044 и выше
                 return build_number >= 19044
             return False
         except:
@@ -200,9 +198,9 @@ class Module:
             elif "0x2" in result.stdout:
                 return 2  # Никогда
             else:
-                return 1  # По умолчанию - При заполнении
+                return 0  # По умолчанию - Всегда
         except:
-            return 1  # По умолчанию - При заполнении
+            return 0  # По умолчанию - Всегда
 
     def update_button_text(self, button, base_text, state, is_search=False, is_grouping=False):
         """Обновляет текст кнопки с учетом состояния"""
@@ -247,7 +245,7 @@ class Module:
 
         desc_label = ttk.Label(
             self.frame,
-            text="Настройте внешний вид и функциональность панели задач Windows",
+            text="Настройте внешний вид и функциональность Панели задач Windows",
             font=('Arial', 9),
             foreground='#7f8c8d'
         )
@@ -267,7 +265,7 @@ class Module:
         )
         self.toggle_grouping_button.pack(pady=5, fill=tk.X)
         self.create_tooltip(self.toggle_grouping_button,
-                            "Циклически переключает: Всегда → При заполнении → Никогда → Всегда...")
+                            "Всегда → При заполнении → Никогда")
 
         # 2. Кнопка для размера значков (особый случай) - ВТОРАЯ
         taskbar_size_state = self.check_taskbar_size_state()
@@ -291,7 +289,7 @@ class Module:
             width=40
         )
         self.toggle_search_button.pack(pady=5, fill=tk.X)
-        self.create_tooltip(self.toggle_search_button, "Циклически переключает: Поле → Значок → Скрыто → Поле...")
+        self.create_tooltip(self.toggle_search_button, "Поле → Значок → Скрыто")
 
         # 4. Кнопка для Просмотр задач - ЧЕТВЕРТАЯ
         task_view_state = self.check_task_view_state()
@@ -344,7 +342,7 @@ class Module:
         else:
             self.toggle_meet_now_button.config(state='disabled')
             self.create_tooltip(self.toggle_meet_now_button,
-                                "Эта функция доступна только в Windows 21H2 (19044) и выше")
+                                "Эта функция доступна только в Windows 10 21H2 и выше")
 
         # 8. Кнопка для дня недели - ПОСЛЕДНЯЯ
         weekday_state = self.check_weekday_state()
@@ -367,7 +365,7 @@ class Module:
             width=18
         )
         restart_explorer_btn.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        self.create_tooltip(restart_explorer_btn, "Перезагружает Проводник Windows для применения изменений")
+        self.create_tooltip(restart_explorer_btn, "Перезапускает Проводник Windows для применения изменений")
 
         reset_all_btn = ttk.Button(
             extra_frame,
@@ -450,9 +448,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_notification_center(self):
         """Включить или отключить Центр уведомлений."""
@@ -503,9 +501,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_taskbar_size(self):
         """Переключить размер значков на панели задач (большие/маленькие)."""
@@ -538,9 +536,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_search(self):
         """Циклически переключить состояние Поиска: Поле → Значок → Скрыто → Поле..."""
@@ -565,9 +563,9 @@ class Module:
             )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_people(self):
         """Скрыть или показать Люди на панели задач."""
@@ -616,9 +614,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_task_view(self):
         """Скрыть или показать Просмотр задач на панели задач."""
@@ -654,9 +652,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_meet_now(self):
         """Скрыть или показать кнопку 'Провести собрание' на панели задач."""
@@ -711,9 +709,9 @@ class Module:
                 )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def toggle_grouping(self):
         """Циклически переключить состояние группировки кнопок: Всегда → При заполнении → Никогда → Всегда..."""
@@ -738,9 +736,9 @@ class Module:
             )
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def restart_explorer(self):
         """Перезапустить Проводник Windows."""
@@ -751,9 +749,9 @@ class Module:
             subprocess.Popen(['explorer.exe'])
 
         except subprocess.CalledProcessError:
-            pass  # Не показываем сообщение об ошибке
+            pass
         except Exception:
-            pass  # Не показываем сообщение об ошибке
+            pass
 
     def reset_all_settings(self):
         """Сбросить все настройки панели задач к значениям по умолчанию."""
@@ -835,7 +833,7 @@ class Module:
             # Показываем сообщение об ошибке
             messagebox.showerror(
                 "Ошибка сброса настроек",
-                f"Не удалось сбросить настройки.\nОшибка: {str(e)}"
+                f"Не удалось сбросить настройки\nОшибка: {str(e)}"
             )
 
     def update_all_button_texts(self):

@@ -99,14 +99,12 @@ class DLLChecker:
             system32_path = r"C:\Windows\System32\imaster.dll"
 
             import ctypes
-            # Убрано сообщение о правах администратора
 
             if os.path.exists(system32_path):
                 existing_hash = calculate_sha1(system32_path)
                 source_hash = calculate_sha1(dll_path)
 
                 if existing_hash == source_hash:
-                    # Убрано сообщение о том, что файл уже существует с тем же хешем
                     return True, None  # Возвращаем None вместо сообщения
                 else:
                     root = tk.Tk()
@@ -120,7 +118,6 @@ class DLLChecker:
                     root.destroy()
 
                     if not response:
-                        # Убрано сообщение об отказе от перезаписи
                         return False, None
 
             shutil.copy2(dll_path, system32_path)
@@ -132,7 +129,6 @@ class DLLChecker:
                 return False, "Не удалось скопировать файл"
 
         except PermissionError:
-            # Убрано сообщение о правах доступа
             return False, "Отказано в доступе"
         except Exception as e:
             return False, f"Ошибка при копировании: {str(e)}"
@@ -542,7 +538,7 @@ class InterfaceMaster:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v1.1 (Beta 2)")
+        self.root.title("Interface Master v1.1")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -567,7 +563,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "1.1.0.116 beta 2"
+        self.version = "1.1.0.120"
 
         self.logo_image = None
         self.logo_photo = None

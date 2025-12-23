@@ -58,7 +58,7 @@ class ExplorerModule:
         """Создание вкладки управления папками"""
         desc_label = ttk.Label(
             parent,
-            text="Выберите какие папки отображать\n в разделе Этот компьютер",
+            text="Выберите какие папки\n отображать в Этот компьютер",
             font=('Arial', 10),
             foreground='#7f8c8d',
             wraplength=500
@@ -256,14 +256,14 @@ class ExplorerModule:
             if result1.returncode == 0 and result2.returncode == 0:
                 self.bitlocker_enabled = False
                 self.bitlocker_status_label.config(
-                    text="BitLocker СКРЫТ из контекстного меню",
+                    text="BitLocker убран из контекстного меню",
                     foreground='#e74c3c'
                 )
                 self.bitlocker_button.config(text="Включить BitLocker")
             else:
                 self.bitlocker_enabled = True
                 self.bitlocker_status_label.config(
-                    text="BitLocker ОТОБРАЖАЕТСЯ в контекстном меню",
+                    text="BitLocker отображается в контекстном меню",
                     foreground='#27ae60'
                 )
                 self.bitlocker_button.config(text="Отключить BitLocker")

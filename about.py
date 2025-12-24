@@ -119,7 +119,7 @@ class AboutModule:
 
         dev_text = f"""Идея: EvKyz
 Реализация: DeepSeek AI
-Сборка: 23 декабря 2025
+Сборка: 24 декабря 2025
 Лицензия: MIT License"""
 
         dev_label = ttk.Label(

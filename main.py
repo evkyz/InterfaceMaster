@@ -104,15 +104,23 @@ class DLLChecker:
                 existing_hash = calculate_sha1(system32_path)
                 source_hash = calculate_sha1(dll_path)
 
-                if existing_hash == source_hash:
-                    return True, None  # Возвращаем None вместо сообщения
+                # Проверяем, является ли существующий хеш валидным
+                expected_hashes = InterfaceMaster.DLLCheckerInternal.VALID_HASHES
+
+                if existing_hash in expected_hashes:
+                    # Если существующий файл уже имеет валидный хеш
+                    # Не предлагаем замену, даже если хеши разные
+                    return True, None  # Возвращаем None, файл уже валиден
                 else:
+                    # Если существующий файл имеет невалидный хеш
                     root = tk.Tk()
                     root.withdraw()
 
                     response = messagebox.askyesno(
                         "Перезапись файла",
                         "Файл imaster.dll уже существует в System32 с другим хешем\n"
+                        f"Хеш существующего файла: {existing_hash if existing_hash else 'Не удалось вычислить'}\n"
+                        f"Хеш для копирования: {source_hash}\n\n"
                         "Хотите перезаписать его?"
                     )
                     root.destroy()
@@ -218,7 +226,7 @@ class DLLChecker:
         if os.path.exists(system32_path):
             system32_dll_exists = True
             system32_hash = calculate_sha1(system32_path)
-            if system32_hash == dll_info['expected_sha1']:
+            if system32_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
                 system32_hash_match = True
 
         registry_dll_path = DLLChecker.check_registry_for_dll_path()
@@ -279,7 +287,8 @@ class DLLChecker:
         response = messagebox.askyesno(
             "Копирование DLL",
             f"Рекомендуется скопировать файл imaster.dll в System32\n\n"
-            f"Текущее расположение: {dll_status['dll_path']}\n\n"
+            f"Текущее расположение: {dll_status['dll_path']}\n"
+            f"Хеш файла: {dll_status['actual_hash']}\n\n"
             f"Хотите скопировать файл в C:\\Windows\\System32?\n\n"
         )
 
@@ -318,9 +327,10 @@ class DLLChecker:
 
         if not dll_status['hash_match']:
             if parent_window and module_name in ["desktop", "disk"]:
+                valid_hashes = InterfaceMaster.DLLCheckerInternal.VALID_HASHES
                 messagebox.showwarning("Внимание",
                                        f"Файл imaster.dll поврежден!\n\n"
-                                       f"Ожидаемый хеш: {dll_status['expected_sha1']}\n"
+                                       f"Допустимые хеши: {', '.join(valid_hashes)}\n"
                                        f"Фактический хеш: {dll_status['actual_hash']}")
             return None
 
@@ -355,7 +365,11 @@ class InterfaceMaster:
     class DLLCheckerInternal:
         """Внутренний класс для проверки DLL"""
 
-        EXPECTED_SHA1 = 'F62A4326A8300D9B828744E24314B98433510195'
+        # Два валидных хеша SHA-1
+        VALID_HASHES = [
+            'F62A4326A8300D9B828744E24314B98433510195',  # Первый валидный хеш
+            'A522AC997631927EA8CA441F1916E9375AD19805'  # Второй валидный хеш
+        ]
 
         def __init__(self, base_path):
             self.base_path = base_path
@@ -461,16 +475,16 @@ class InterfaceMaster:
 
             return list(dll_paths)
 
-        def verify_dll_hash(self, dll_path, expected_sha1):
+        def verify_dll_hash(self, dll_path):
             """Проверяет хеш DLL файла"""
             actual_hash = calculate_sha1(dll_path)
             hash_match = False
 
             if actual_hash:
-                hash_match = (actual_hash == expected_sha1)
+                hash_match = (actual_hash in self.VALID_HASHES)
 
             return {
-                'expected_sha1': expected_sha1,
+                'valid_hashes': self.VALID_HASHES,
                 'actual_hash': actual_hash,
                 'dll_path': dll_path,
                 'hash_match': hash_match,
@@ -512,23 +526,23 @@ class InterfaceMaster:
 
             for file_path, description in search_locations:
                 if os.path.exists(file_path):
-                    return self.verify_dll_hash(file_path, self.EXPECTED_SHA1)
+                    return self.verify_dll_hash(file_path)
 
             registry_paths = self.search_dll_in_registry()
 
             if registry_paths:
                 for reg_path in registry_paths:
                     if os.path.exists(reg_path):
-                        return self.verify_dll_hash(reg_path, self.EXPECTED_SHA1)
+                        return self.verify_dll_hash(reg_path)
                     else:
                         filename = os.path.basename(reg_path)
                         if filename.lower() == "imaster.dll":
                             for file_path, description in search_locations:
                                 if os.path.exists(file_path):
-                                    return self.verify_dll_hash(file_path, self.EXPECTED_SHA1)
+                                    return self.verify_dll_hash(file_path)
 
             return {
-                'expected_sha1': self.EXPECTED_SHA1,
+                'valid_hashes': self.VALID_HASHES,
                 'actual_hash': None,
                 'dll_path': None,
                 'hash_match': False,
@@ -538,7 +552,7 @@ class InterfaceMaster:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v1.1")
+        self.root.title("Interface Master v1.1.1")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -563,7 +577,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "1.1.0.120"
+        self.version = "1.1.1.125"
 
         self.logo_image = None
         self.logo_photo = None

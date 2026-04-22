@@ -3,6 +3,7 @@ import string
 import subprocess
 import tkinter as tk
 from tkinter import ttk
+import ctypes
 
 try:
     from main import DLLChecker
@@ -77,6 +78,8 @@ class Module:
         }
 
         self.message_timer = None
+        self._is_destroyed = False
+        self.tooltip_window = None  # Для всплывающих подсказок
 
         self.create_widgets()
         self.show()
@@ -89,24 +92,35 @@ class Module:
         return dll_path
 
     def show_message(self, message, message_type="info"):
+        if self._is_destroyed:
+            return
+
         if self.message_timer:
             self.parent.after_cancel(self.message_timer)
 
-        self.message_label.config(text=message)
+        if self.message_label.winfo_exists():
+            self.message_label.config(text=message)
 
-        if message_type == "info":
-            self.message_label.config(foreground='#2c3e50')
-        elif message_type == "success":
-            self.message_label.config(foreground='#27ae60')
-        elif message_type == "warning":
-            self.message_label.config(foreground='#e74c3c')
+            if message_type == "info":
+                self.message_label.config(foreground='#2c3e50')
+            elif message_type == "success":
+                self.message_label.config(foreground='#27ae60')
+            elif message_type == "warning":
+                self.message_label.config(foreground='#e74c3c')
 
-        self.message_label.pack(pady=5)
-        self.message_timer = self.parent.after(3000, self.clear_message)
+            self.message_label.pack(pady=5)
+            self.message_timer = self.parent.after(3000, self.clear_message)
 
     def clear_message(self):
-        self.message_label.config(text="")
-        self.message_label.pack_forget()
+        if self._is_destroyed:
+            return
+
+        try:
+            if self.message_label.winfo_exists():
+                self.message_label.config(text="")
+                self.message_label.pack_forget()
+        except:
+            pass
         self.message_timer = None
 
     def get_available_disks(self):
@@ -116,6 +130,75 @@ class Module:
             if os.path.exists(drive_path):
                 disks.append(drive_path)
         return disks
+
+    def create_tooltip(self, widget, text):
+        """Создать всплывающую подсказку"""
+        def enter(event):
+            if self._is_destroyed:
+                return
+            try:
+                x, y, cx, cy = widget.bbox("insert")
+                x += widget.winfo_rootx() + 25
+                y += widget.winfo_rooty() + 25
+                self.tooltip_window = tk.Toplevel(widget)
+                self.tooltip_window.wm_overrideredirect(True)
+                self.tooltip_window.wm_geometry(f"+{x}+{y}")
+                label = tk.Label(self.tooltip_window, text=text,
+                               background="lightyellow", relief="solid",
+                               borderwidth=1, font=("Arial", 8), padx=5, pady=2)
+                label.pack()
+            except:
+                pass
+
+        def leave(event):
+            if hasattr(self, 'tooltip_window') and self.tooltip_window:
+                try:
+                    self.tooltip_window.destroy()
+                except:
+                    pass
+                delattr(self, 'tooltip_window')
+
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
+
+    def clear_icon_cache(self):
+        """Очистка кэша иконок Windows"""
+        if self._is_destroyed:
+            return
+
+        try:
+            # Показываем сообщение о начале очистки
+            self.show_message("Очистка кэша иконок...", "info")
+            
+            # Выполняем очистку кэша иконок
+            # Первая команда: очистка кэша
+            result1 = subprocess.run(['ie4uinit.exe', '-ClearIconCache'], 
+                                    capture_output=True, text=True, timeout=30)
+            
+            # Вторая команда: обновление иконок
+            result2 = subprocess.run(['ie4uinit.exe', '-show'], 
+                                    capture_output=True, text=True, timeout=30)
+            
+            # Дополнительная команда для Windows 10/11
+            try:
+                subprocess.run(['ie4uinit.exe', '-ClearIconCache', '-show'], 
+                              capture_output=True, timeout=30)
+            except:
+                pass
+            
+            # Принудительное обновление обоев рабочего стола
+            try:
+                # Обновляем рабочий стол через системный вызов
+                ctypes.windll.user32.SystemParametersInfoW(0x0014, 0, None, 0x0002 | 0x0001)
+            except:
+                pass
+            
+            self.show_message("Кэш иконок успешно очищен и обновлен!", "success")
+            
+        except subprocess.TimeoutExpired:
+            self.show_message("Очистка кэша заняла слишком много времени", "warning")
+        except Exception as e:
+            self.show_message(f"Ошибка при очистке кэша: {str(e)}", "warning")
 
     def create_widgets(self):
         title_label = ttk.Label(
@@ -195,7 +278,16 @@ class Module:
             text="Удалить все иконки",
             command=self.remove_all_icons
         )
-        self.remove_all_icons_button.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        self.remove_all_icons_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        self.clear_cache_button = ttk.Button(
+            delete_frame,
+            text="Очистить кеш",
+            command=self.clear_icon_cache
+        )
+        self.clear_cache_button.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+        # Добавляем всплывающую подсказку для кнопки очистки кеша
+        self.create_tooltip(self.clear_cache_button, "Очистить кеш иконок Windows")
 
         self.message_label = ttk.Label(
             settings_frame,
@@ -256,7 +348,7 @@ class Module:
                     subprocess.run(
                         [
                             'reg', 'delete',
-                            f'HKLM\\SOFTWARE\\Microsoft\\Windows\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}',
+                            f'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\{selected_disk}',
                             '/f'
                         ],
                         check=True,
@@ -275,7 +367,7 @@ class Module:
             subprocess.run(
                 [
                     'reg', 'delete',
-                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\Explorer\\DriveIcons',
+                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons',
                     '/f'
                 ],
                 check=True,
@@ -293,4 +385,5 @@ class Module:
         self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     def hide(self):
+        self._is_destroyed = True
         self.frame.pack_forget()

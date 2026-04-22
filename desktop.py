@@ -454,7 +454,7 @@ class Module:
             center_frame,
             text="Применить",
             command=self.apply_icon_set,
-            width=20,
+            width=15,
         )
         self.apply_btn.pack(side=tk.LEFT, padx=5)
 
@@ -462,9 +462,28 @@ class Module:
             center_frame,
             text="Сбросить",
             command=self.reset_icons,
-            width=20
+            width=15
         )
         self.reset_btn.pack(side=tk.LEFT, padx=5)
+
+        self.clear_cache_btn = ttk.Button(
+            center_frame,
+            text="Очистить кеш",
+            command=self.clear_icon_cache,
+            width=15
+        )
+        self.clear_cache_btn.pack(side=tk.LEFT, padx=5)
+        # Добавляем всплывающую подсказку для кнопки очистки кеша
+        self.create_tooltip(self.clear_cache_btn, "Очистить кеш иконок Windows")
+
+        self.message_label = ttk.Label(
+            main_container,
+            text="",
+            font=('Arial', 9),
+            wraplength=400
+        )
+
+        self.update_buttons_state()
 
         self.message_label = ttk.Label(
             main_container,
@@ -486,6 +505,7 @@ class Module:
             self.apply_btn.config(state='disabled')
 
         self.reset_btn.config(state='normal')
+        self.clear_cache_btn.config(state='normal')
 
     def on_icon_set_select(self, event=None):
         """Обработчик выбора набора иконок"""
@@ -557,6 +577,45 @@ class Module:
             return True
         except:
             return False
+
+    def clear_icon_cache(self):
+        """Очистка кэша иконок Windows"""
+        if self._is_destroyed:
+            return
+
+        try:
+            # Показываем сообщение о начале очистки
+            self.show_message("Очистка кэша иконок...", "info")
+            
+            # Выполняем очистку кэша иконок
+            # Первая команда: очистка кэша
+            result1 = subprocess.run(['ie4uinit.exe', '-ClearIconCache'], 
+                                    capture_output=True, text=True, timeout=30)
+            
+            # Вторая команда: обновление иконок
+            result2 = subprocess.run(['ie4uinit.exe', '-show'], 
+                                    capture_output=True, text=True, timeout=30)
+            
+            # Дополнительная команда для Windows 10/11
+            try:
+                subprocess.run(['ie4uinit.exe', '-ClearIconCache', '-show'], 
+                              capture_output=True, timeout=30)
+            except:
+                pass
+            
+            # Принудительное обновление обоев рабочего стола
+            try:
+                # Обновляем рабочий стол через системный вызов
+                ctypes.windll.user32.SystemParametersInfoW(0x0014, 0, None, 0x0002 | 0x0001)
+            except:
+                pass
+            
+            self.show_message("Кэш иконок успешно очищен и обновлен!", "success")
+            
+        except subprocess.TimeoutExpired:
+            self.show_message("Очистка кэша заняла слишком много времени", "warning")
+        except Exception as e:
+            self.show_message(f"Ошибка при очистке кэша: {str(e)}", "warning")
 
     def set_icon(self, reg_path, icon_value, param_name="", use_local_machine=False, use_classes_root=False,
                  is_reset=False):

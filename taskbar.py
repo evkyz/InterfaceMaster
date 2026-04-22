@@ -741,17 +741,28 @@ class Module:
             pass
 
     def restart_explorer(self):
-        """Перезапустить Проводник Windows."""
+        """Перезапустить Проводник Windows без всплывающих окон."""
         try:
+            # Убиваем процесс explorer.exe
             subprocess.run(['taskkill', '/f', '/im', 'explorer.exe'],
-                           capture_output=True, check=True)
+                           capture_output=True,
+                           check=False)  # Не вызываем исключение при ошибке
 
-            subprocess.Popen(['explorer.exe'])
+            # Даем немного времени для завершения процесса
+            import time
+            time.sleep(1)
 
-        except subprocess.CalledProcessError:
-            pass
+            # Запускаем explorer.exe заново
+            subprocess.Popen(['explorer.exe'],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+
         except Exception:
-            pass
+            # Если что-то пошло не так, пробуем просто запустить explorer.exe
+            try:
+                subprocess.Popen(['explorer.exe'],
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+            except:
+                pass
 
     def reset_all_settings(self):
         """Сбросить все настройки панели задач к значениям по умолчанию."""
@@ -783,6 +794,7 @@ class Module:
                     ['HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer', 'HideSCAMeetNow']
                 )
 
+            # Сбрасываем настройки
             for setting in settings_to_reset:
                 try:
                     subprocess.run(
@@ -823,14 +835,11 @@ class Module:
             # Обновляем тексты кнопок после сброса
             self.update_all_button_texts()
 
-            # Показываем всплывающее окно об успешном сбросе
-            messagebox.showinfo(
-                "Сброс настроек",
-                "Настройки сброшены по умолчанию"
-            )
+            # Автоматически перезапускаем проводник
+            self.restart_explorer()
 
         except Exception as e:
-            # Показываем сообщение об ошибке
+            # Показываем сообщение об ошибке только при реальной ошибке
             messagebox.showerror(
                 "Ошибка сброса настроек",
                 f"Не удалось сбросить настройки\nОшибка: {str(e)}"

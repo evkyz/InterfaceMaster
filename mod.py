@@ -554,6 +554,14 @@ class Module:
         hash_window.geometry("840x200")
         hash_window.resizable(False, False)
 
+        # Устанавливаем иконку окна (если файл существует)
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                hash_window.iconbitmap(icon_path)
+            except Exception as e:
+                print(f"Не удалось установить иконку: {e}")
+
         # Главный фрейм
         main_frame = ttk.Frame(hash_window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)

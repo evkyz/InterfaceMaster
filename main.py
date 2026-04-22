@@ -61,6 +61,34 @@ class DLLChecker:
 
     dll_info = None
     copy_offered = False
+    
+    # Ключ реестра для сохранения пути к DLL
+    REGISTRY_KEY_PATH = r"Software\InterfaceMaster"
+    REGISTRY_DLL_PATH_KEY = "DLLPath"
+
+    @staticmethod
+    def save_dll_path_to_registry(dll_path):
+        """Сохраняет путь к DLL в реестр"""
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, DLLChecker.REGISTRY_KEY_PATH) as key:
+                winreg.SetValueEx(key, DLLChecker.REGISTRY_DLL_PATH_KEY, 0, winreg.REG_SZ, dll_path)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def get_dll_path_from_registry():
+        """Получает путь к DLL из реестра"""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, DLLChecker.REGISTRY_KEY_PATH, 0, winreg.KEY_READ) as key:
+                dll_path, _ = winreg.QueryValueEx(key, DLLChecker.REGISTRY_DLL_PATH_KEY)
+                if os.path.exists(dll_path):
+                    return dll_path
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def initialize():
@@ -131,6 +159,8 @@ class DLLChecker:
             shutil.copy2(dll_path, system32_path)
 
             if os.path.exists(system32_path):
+                # Сохраняем путь в реестр после успешного копирования
+                DLLChecker.save_dll_path_to_registry(system32_path)
                 DLLChecker.initialize()
                 return True, "Файл успешно скопирован в System32"
             else:
@@ -229,27 +259,52 @@ class DLLChecker:
             if system32_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
                 system32_hash_match = True
 
+        # Проверяем сохраненный путь из реестра программы
+        saved_dll_path = DLLChecker.get_dll_path_from_registry()
+        saved_path_valid = saved_dll_path and os.path.exists(saved_dll_path)
+        
         registry_dll_path = DLLChecker.check_registry_for_dll_path()
         dll_in_registry = registry_dll_path is not None
 
-        if dll_in_registry and registry_dll_path:
-            recommended_path = registry_dll_path
-            source = "registry"
-        elif system32_dll_exists and system32_hash_match:
-            recommended_path = system32_path
-            source = "system32"
-        elif dll_info['dll_found'] and dll_info['hash_match']:
-            recommended_path = dll_info['dll_path']
-            source = "found"
+        # Определяем рекомендуемый путь
+        if saved_path_valid:
+            # Проверяем хеш сохраненного файла
+            saved_hash = calculate_sha1(saved_dll_path)
+            if saved_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
+                recommended_path = saved_dll_path
+                source = "saved_registry"
+            else:
+                saved_path_valid = False
+                recommended_path = None
+                source = "none"
         else:
             recommended_path = None
             source = "none"
+
+        if not recommended_path:
+            if dll_in_registry and registry_dll_path:
+                recommended_path = registry_dll_path
+                source = "registry"
+            elif system32_dll_exists and system32_hash_match:
+                recommended_path = system32_path
+                source = "system32"
+            elif dll_info['dll_found'] and dll_info['hash_match']:
+                recommended_path = dll_info['dll_path']
+                source = "found"
+            else:
+                recommended_path = None
+                source = "none"
+
+        # Сохраняем путь в реестр программы если нашли валидный
+        if recommended_path and source != "saved_registry":
+            DLLChecker.save_dll_path_to_registry(recommended_path)
 
         should_offer_copy = (
                 dll_info['dll_found'] and
                 dll_info['hash_match'] and
                 not (system32_dll_exists and system32_hash_match) and
-                not dll_in_registry
+                not dll_in_registry and
+                not saved_path_valid
         )
 
         return {
@@ -262,6 +317,7 @@ class DLLChecker:
             'is_in_system32': system32_dll_exists and system32_hash_match,
             'is_in_registry': dll_in_registry,
             'registry_path': registry_dll_path,
+            'saved_path': saved_dll_path,
             'source': source
         }
 
@@ -290,6 +346,7 @@ class DLLChecker:
             f"Текущее расположение: {dll_status['dll_path']}\n"
             f"Хеш файла: {dll_status['actual_hash']}\n\n"
             f"Хотите скопировать файл в C:\\Windows\\System32?\n\n"
+            f"Это обеспечит стабильную работу программы при любом расположении."
         )
 
         if response:
@@ -300,6 +357,8 @@ class DLLChecker:
                 if message:
                     messagebox.showinfo("Успех", message)
                 DLLChecker.initialize()
+                # Сохраняем путь в реестр
+                DLLChecker.save_dll_path_to_registry(dll_status['system32_path'])
                 return dll_status['system32_path']
             else:
                 # Показываем предупреждение только если есть сообщение об ошибке
@@ -307,8 +366,12 @@ class DLLChecker:
                     messagebox.showwarning("Предупреждение",
                                            f"Не удалось скопировать файл:\n{message}\n\n"
                                            f"Будет использовано текущее расположение")
+                # Сохраняем текущий путь в реестр
+                DLLChecker.save_dll_path_to_registry(dll_status['dll_path'])
                 return dll_status['dll_path']
         else:
+            # Сохраняем текущий путь в реестр
+            DLLChecker.save_dll_path_to_registry(dll_status['dll_path'])
             return dll_status['dll_path']
 
     @staticmethod
@@ -493,6 +556,11 @@ class InterfaceMaster:
 
         def check_imaster_dll(self):
             """Проверяет imaster.dll во всех возможных расположениях"""
+            # Сначала проверяем сохраненный путь из реестра
+            saved_path = DLLChecker.get_dll_path_from_registry()
+            if saved_path and os.path.exists(saved_path):
+                return self.verify_dll_hash(saved_path)
+
             search_locations = []
 
             system32_path = r"C:\Windows\System32\imaster.dll"
@@ -526,20 +594,30 @@ class InterfaceMaster:
 
             for file_path, description in search_locations:
                 if os.path.exists(file_path):
-                    return self.verify_dll_hash(file_path)
+                    result = self.verify_dll_hash(file_path)
+                    if result['hash_match']:
+                        # Сохраняем найденный валидный путь в реестр
+                        DLLChecker.save_dll_path_to_registry(file_path)
+                    return result
 
             registry_paths = self.search_dll_in_registry()
 
             if registry_paths:
                 for reg_path in registry_paths:
                     if os.path.exists(reg_path):
-                        return self.verify_dll_hash(reg_path)
+                        result = self.verify_dll_hash(reg_path)
+                        if result['hash_match']:
+                            DLLChecker.save_dll_path_to_registry(reg_path)
+                        return result
                     else:
                         filename = os.path.basename(reg_path)
                         if filename.lower() == "imaster.dll":
                             for file_path, description in search_locations:
                                 if os.path.exists(file_path):
-                                    return self.verify_dll_hash(file_path)
+                                    result = self.verify_dll_hash(file_path)
+                                    if result['hash_match']:
+                                        DLLChecker.save_dll_path_to_registry(file_path)
+                                    return result
 
             return {
                 'valid_hashes': self.VALID_HASHES,
@@ -552,7 +630,7 @@ class InterfaceMaster:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v1.1.1")
+        self.root.title("Interface Master v2.0")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -577,7 +655,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "1.1.1.125"
+        self.version = "2.0.3.140"
 
         self.logo_image = None
         self.logo_photo = None
@@ -756,7 +834,7 @@ class InterfaceMaster:
 
         self.copyright_label = ttk.Label(
             right_footer_frame,
-            text="© EvKyz, 2025",
+            text="© EvKyz, 2026",
             font=('Arial', 7),
             foreground='#95a5a6'
         )

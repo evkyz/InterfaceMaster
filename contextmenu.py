@@ -10,7 +10,32 @@ class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-        self.powershell_log_window = None
+        self.context_menu_module = ContextMenuModule(self.frame)
+        self.show()
+
+    def show(self):
+        """Показать модуль"""
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    def hide(self):
+        """Скрыть модуль"""
+        self.frame.pack_forget()
+
+
+class ContextMenuModule:
+    def __init__(self, parent):
+        self.parent = parent
+
+        # Импортируем и создаем подмодули
+        try:
+            from createnew import CreateNewModule
+            from sendto import SendToModule
+            self.create_new_module = CreateNewModule
+            self.sendto_module = SendToModule
+        except ImportError:
+            # Если модули не найдены, создаем заглушки
+            self.create_new_module = None
+            self.sendto_module = None
 
         self.create_widgets()
         self.show()
@@ -19,14 +44,14 @@ class Module:
         """Создание виджетов для настройки контекстного меню"""
 
         title_label = ttk.Label(
-            self.frame,
+            self.parent,
             text="Настройка контекстного меню",
             font=('Arial', 16, 'bold'),
             foreground='#2c3e50'
         )
         title_label.pack(pady=10)
 
-        notebook = ttk.Notebook(self.frame)
+        notebook = ttk.Notebook(self.parent)
         notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         desktop_menu_frame = ttk.Frame(notebook)
@@ -37,15 +62,39 @@ class Module:
         notebook.add(create_menu_frame, text="          Меню Создать          ")
         notebook.add(sendto_menu_frame, text="         Меню Отправить         ")
 
-        self.create_desktop_menu_tab(desktop_menu_frame)
-        self.create_new_menu_tab(create_menu_frame)
-        self.create_sendto_menu_tab(sendto_menu_frame)
+        # Создаем вкладки
+        self.desktop_menu_tab = DesktopMenuTab(desktop_menu_frame)
 
-    def create_desktop_menu_tab(self, parent):
+        # Создаем подмодули для вкладок
+        if self.create_new_module:
+            self.create_new_tab = self.create_new_module(create_menu_frame)
+        else:
+            ttk.Label(create_menu_frame, text="Модуль 'Создать' не найден").pack(pady=20)
+
+        if self.sendto_module:
+            self.sendto_tab = self.sendto_module(sendto_menu_frame)
+        else:
+            ttk.Label(sendto_menu_frame, text="Модуль 'Отправить' не найден").pack(pady=20)
+
+    def show(self):
+        """Показать модуль"""
+        self.parent.pack(fill=tk.BOTH, expand=True)
+
+    def hide(self):
+        """Скрыть модуль"""
+        self.parent.pack_forget()
+
+
+class DesktopMenuTab:
+    def __init__(self, parent):
+        self.parent = parent
+        self.create_widgets()
+
+    def create_widgets(self):
         """Создание вкладки меню рабочего стола"""
 
-        canvas = tk.Canvas(parent)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas = tk.Canvas(self.parent)
+        scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
         scrollable_frame.bind(
@@ -221,7 +270,7 @@ class Module:
             },
             {
                 "name": "Диспетчер задач",
-                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
+                "add_tooltip": "Контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_task_manager,
                 "remove_command": self.remove_task_manager,
@@ -230,8 +279,18 @@ class Module:
                 "default_enabled": False
             },
             {
+                "name": "Очистить буфер",
+                "add_tooltip": "Контекстное меню Рабочего стола",
+                "remove_tooltip": "Контекстное меню Рабочего стола",
+                "add_command": self.add_clipboard_clear,
+                "remove_command": self.remove_clipboard_clear,
+                "check_command": lambda: self.check_menu_item_exists("clipboard_clear"),
+                "enabled": False,
+                "default_enabled": False
+            },
+            {
                 "name": "Перезапустить explorer",
-                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
+                "add_tooltip": "Контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_restart_explorer,
                 "remove_command": self.remove_restart_explorer,
@@ -241,7 +300,7 @@ class Module:
             },
             {
                 "name": "Редактор реестра",
-                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
+                "add_tooltip": "Контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_regedit,
                 "remove_command": self.remove_regedit,
@@ -251,7 +310,7 @@ class Module:
             },
             {
                 "name": "Выключение/Перезагрузка/Гибернация",
-                "add_tooltip": "Добавить в контекстное меню Рабочего стола",
+                "add_tooltip": "Контекстное меню Рабочего стола",
                 "remove_tooltip": "Контекстное меню Рабочего стола",
                 "add_command": self.add_power_menu,
                 "remove_command": self.remove_power_menu,
@@ -261,7 +320,7 @@ class Module:
             },
             {
                 "name": "Администрирование",
-                "add_tooltip": "Добавить в контекстное меню Компьютер",
+                "add_tooltip": "Контекстное меню Компьютер",
                 "remove_tooltip": "Контекстное меню Компьютер",
                 "add_command": self.add_admin_menu,
                 "remove_command": self.remove_admin_menu,
@@ -271,7 +330,7 @@ class Module:
             },
             {
                 "name": "Система",
-                "add_tooltip": "Добавить в контекстное меню Компьютер",
+                "add_tooltip": "Контекстное меню Компьютер",
                 "remove_tooltip": "Контекстное меню Компьютер",
                 "add_command": self.add_system_menu,
                 "remove_command": self.remove_system_menu,
@@ -308,6 +367,9 @@ class Module:
 
             if self.check_menu_item_exists("restart_explorer"):
                 active_items.append("RestartExplorer")
+
+            if self.check_menu_item_exists("clipboard_clear"):
+                active_items.append("Clip")
 
             if self.check_menu_item_exists("regedit"):
                 active_items.append("Regedit")
@@ -951,6 +1013,103 @@ class Module:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
+    def add_clipboard_clear(self):
+        """Добавление пункта 'Очистить буфер' в меню рабочего стола"""
+        try:
+            key_path = r'DesktopBackground\Shell\Clip'
+
+            imaster_dll_path = self.check_imaster_dll_from_main()
+
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, "Очистить буфер")
+                winreg.SetValueEx(key, "Position", 0, winreg.REG_SZ, "Bottom")
+                winreg.SetValueEx(key, "Extended", 0, winreg.REG_SZ, "")
+
+                if imaster_dll_path:
+                    if "System32" in imaster_dll_path or "%SystemRoot%" in imaster_dll_path:
+                        winreg.SetValueEx(key, "Icon", 0, winreg.REG_EXPAND_SZ, f"{imaster_dll_path},-1003")
+                    else:
+                        winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f"{imaster_dll_path},-1003")
+
+            command_key = key_path + r'\command'
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, command_key)
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, command_key, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "cmd /c echo off | clip")
+
+            self.update_desktop_shell_order()
+            self.update_menu_items_status()
+
+        except PermissionError as pe:
+            if self.take_ownership_registry_key_simple(key_path):
+                if self.set_registry_key_permissions_simple(key_path):
+                    try:
+                        winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
+
+                        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                            winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, "Очистить буфер")
+                            winreg.SetValueEx(key, "Position", 0, winreg.REG_SZ, "Bottom")
+                            winreg.SetValueEx(key, "Extended", 0, winreg.REG_SZ, "")
+
+                            if imaster_dll_path:
+                                if "System32" in imaster_dll_path or "%SystemRoot%" in imaster_dll_path:
+                                    winreg.SetValueEx(key, "Icon", 0, winreg.REG_EXPAND_SZ, f"{imaster_dll_path},-1003")
+                                else:
+                                    winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f"{imaster_dll_path},-1003")
+
+                        command_key = key_path + r'\command'
+                        winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, command_key)
+
+                        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, command_key, 0, winreg.KEY_SET_VALUE) as key:
+                            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "cmd /c echo off | clip")
+
+                        self.update_desktop_shell_order()
+                        self.update_menu_items_status()
+                    except:
+                        messagebox.showerror("Ошибка", "Не удалось добавить пункт 'Очистить буфер'")
+                else:
+                    messagebox.showerror("Ошибка", "Не удалось установить права доступа")
+            else:
+                messagebox.showerror("Ошибка", "Не удалось получить владение ключом реестра")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {str(e)}")
+
+    def remove_clipboard_clear(self):
+        """Удаление пункта 'Очистить буфер' из меню рабочего стола"""
+        try:
+            key_path = r'DesktopBackground\Shell\Clip'
+
+            command_key = key_path + r'\command'
+            try:
+                winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, command_key)
+            except FileNotFoundError:
+                pass
+
+            winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, key_path)
+
+            self.update_desktop_shell_order()
+            self.update_menu_items_status()
+
+        except FileNotFoundError:
+            self.update_menu_items_status()
+        except PermissionError as pe:
+            if self.take_ownership_registry_key_simple(key_path):
+                if self.set_registry_key_permissions_simple(key_path):
+                    try:
+                        self.delete_registry_key_recursive(winreg.HKEY_CLASSES_ROOT, key_path)
+                        self.update_desktop_shell_order()
+                        self.update_menu_items_status()
+                    except:
+                        messagebox.showerror("Ошибка", "Не удалось удалить пункт 'Очистить буфер'")
+                else:
+                    messagebox.showerror("Ошибка", "Не удалось установить права доступа")
+            else:
+                messagebox.showerror("Ошибка", "Не удалось получить владение ключом реестра")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
+
     def check_imaster_dll_from_main(self):
         """Проверка наличия файла imaster.dll через модуль main"""
         try:
@@ -1017,6 +1176,13 @@ class Module:
                         winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, "")
                 except:
                     pass
+
+                clip_key = r'DesktopBackground\Shell\Clip'
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, clip_key, 0, winreg.KEY_SET_VALUE) as key:
+                        winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, "")
+                except:
+                    pass
             except:
                 pass
             return
@@ -1039,6 +1205,16 @@ class Module:
                         winreg.SetValueEx(key, "Icon", 0, winreg.REG_EXPAND_SZ, f"{imaster_dll_path},-1002")
                     else:
                         winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f"{imaster_dll_path},-1002")
+            except:
+                pass
+
+            clip_key = r'DesktopBackground\Shell\Clip'
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, clip_key, 0, winreg.KEY_SET_VALUE) as key:
+                    if "System32" in imaster_dll_path or "%SystemRoot%" in imaster_dll_path:
+                        winreg.SetValueEx(key, "Icon", 0, winreg.REG_EXPAND_SZ, f"{imaster_dll_path},-1003")
+                    else:
+                        winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, f"{imaster_dll_path},-1003")
             except:
                 pass
 
@@ -1304,6 +1480,17 @@ class Module:
                 except:
                     return False
 
+            elif item_type == "clipboard_clear":
+                try:
+                    key_path = r'DesktopBackground\Shell\Clip'
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path) as key:
+                        value, _ = winreg.QueryValueEx(key, "MUIVerb")
+                        return value == "Очистить буфер"
+                except FileNotFoundError:
+                    return False
+                except:
+                    return False
+
             elif item_type == "power_menu":
                 try:
                     power_keys = [
@@ -1443,18 +1630,6 @@ class Module:
 
             elif item_type == "modern_sharing":
                 try:
-                    # Сначала проверяем, не заблокировано ли расширение
-                    blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path) as key:
-                            try:
-                                winreg.QueryValueEx(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}")
-                                return False  # Заблокировано
-                            except FileNotFoundError:
-                                pass
-                    except FileNotFoundError:
-                        pass
-                    # Затем проверяем наличие хотя бы одного из ключей ModernSharing
                     modern_sharing_paths = [
                         r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                         r'SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\ModernSharing',
@@ -1462,6 +1637,7 @@ class Module:
                         r'SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\ModernSharing',
                         r'SOFTWARE\Classes\Directory\Background\shellex\ContextMenuHandlers\ModernSharing'
                     ]
+
                     for path in modern_sharing_paths:
                         try:
                             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
@@ -1470,7 +1646,9 @@ class Module:
                                     return True
                         except:
                             continue
+
                     return False
+
                 except FileNotFoundError:
                     return False
                 except:
@@ -1494,7 +1672,7 @@ class Module:
 
             elif item_type == "take_ownership":
                 try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Classes\*\shell\runas'):
+                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r'*\shell\runas'):
                         return True
                 except FileNotFoundError:
                     return False
@@ -1645,7 +1823,7 @@ class Module:
                 if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
                     try:
                         winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHine, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
                             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Taskband Pin")
                         self.update_menu_items_status()
                     except:
@@ -1669,7 +1847,7 @@ class Module:
         except FileNotFoundError:
             self.update_menu_items_status()
         except PermissionError as pe:
-            if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHINE, key_path):
+            if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHine, key_path):
                 if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
                     try:
                         self.delete_registry_key_recursive(winreg.HKEY_LOCAL_MACHINE, key_path)
@@ -1847,7 +2025,7 @@ class Module:
                             if self.take_ownership_registry_key_simple(command_key):
                                 if self.set_registry_key_permissions_simple(command_key):
                                     try:
-                                        winreg.DeleteKey(winreg.HKEY_LOCAL_MACHine, command_key)
+                                        winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, command_key)
                                     except:
                                         pass
 
@@ -1945,16 +2123,6 @@ class Module:
     def add_modern_sharing(self):
         """Добавление современного меню отправки (Metro)"""
         try:
-            blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path, 0, winreg.KEY_SET_VALUE) as key:
-                    try:
-                        winreg.DeleteValue(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}")
-                    except FileNotFoundError:
-                        pass
-            except FileNotFoundError:
-                pass
-
             modern_sharing_paths = [
                 (r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                  '{e2bf9676-5f8f-435c-97eb-11607a5bedf7}'),
@@ -1970,13 +2138,6 @@ class Module:
 
             for key_path, clsid_value in modern_sharing_paths:
                 try:
-                    try:
-                        # Сначала удаляем ключ, если он существует
-                        winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                    except FileNotFoundError:
-                        pass
-
-                    # Создаем новый ключ
                     winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
 
                     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
@@ -1986,10 +2147,6 @@ class Module:
                     if self.take_ownership_registry_key_simple(key_path):
                         if self.set_registry_key_permissions_simple(key_path):
                             try:
-                                try:
-                                    winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                                except:
-                                    pass
                                 winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
                                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0,
                                                     winreg.KEY_SET_VALUE) as key:
@@ -1998,25 +2155,15 @@ class Module:
                                 pass
                 except:
                     pass
+
             self.update_menu_items_status()
+
         except Exception as e:
-            pass
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {str(e)}")
 
     def remove_modern_sharing(self):
         """Удаление современного меню отправки (Metro)"""
         try:
-            # Добавляем в список заблокированных расширений
-            blocked_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked'
-            try:
-                winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, blocked_path)
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, blocked_path, 0,
-                                    winreg.KEY_SET_VALUE) as key:
-                    winreg.SetValueEx(key, "{e2bf9676-5f8f-435c-97eb-11607a5bedf7}", 0,
-                                      winreg.REG_SZ, "Отправить (metro)")
-            except:
-                pass
-
-            # Удаляем все пути ModernSharing
             modern_sharing_paths = [
                 r'SOFTWARE\Classes\*\shellex\ContextMenuHandlers\ModernSharing',
                 r'SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\ModernSharing',
@@ -2040,11 +2187,14 @@ class Module:
                                     pass
                     except:
                         pass
+
                 except:
                     pass
+
             self.update_menu_items_status()
+
         except Exception as e:
-            pass
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
     def add_delete_folder_content(self):
         """Добавление удаления содержимого папки (HKLM)"""
@@ -2138,51 +2288,100 @@ class Module:
             messagebox.showerror("Ошибка", f"Ошибка при удалении меню: {str(e)}")
 
     def add_take_ownership(self):
-        """Добавление 'Стать владельцем' (HKLM)"""
+        """Добавление 'Стать владельцем' (HKCR)"""
         try:
-            take_ownership_keys = [
-                r'SOFTWARE\Classes\*\shell\runas',
-                r'SOFTWARE\Classes\Directory\shell\runas',
-            ]
+            # Для файлов
+            files_key = r'*\shell\runas'
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, files_key)
 
-            for key_path in take_ownership_keys:
-                try:
-                    winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Стать владельцем")
-                        winreg.SetValueEx(key, "HasLUAShield", 0, winreg.REG_SZ, "")
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, files_key, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Стать владельцем")
+                winreg.SetValueEx(key, "NoWorkingDirectory", 0, winreg.REG_SZ, "")
+                winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, "imageres.dll,54")
+                winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, "Стать владельцем")
 
-                    command_key = key_path + r'\command'
-                    winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, command_key)
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, command_key, 0, winreg.KEY_SET_VALUE) as cmd_key:
-                        winreg.SetValueEx(cmd_key, "", 0, winreg.REG_SZ,
-                                          'cmd.exe /c "takeown /f \"%1\" && icacls \"%1\" /grant administrators:F"')
-                except:
-                    pass
+            files_command = files_key + r'\command'
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, files_command)
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, files_command, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ,
+                                  'cmd.exe /c takeown /f "%1" && icacls "%1" /grant администраторы:F')
+                winreg.SetValueEx(key, "IsolatedCommand", 0, winreg.REG_SZ,
+                                  'cmd.exe /c takeown /f "%1" && icacls "%1" /grant администраторы:F')
+
+            # Для папок
+            dir_key = r'Directory\shell\runas'
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, dir_key)
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, dir_key, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "Стать владельцем")
+                winreg.SetValueEx(key, "NoWorkingDirectory", 0, winreg.REG_SZ, "")
+                winreg.SetValueEx(key, "Icon", 0, winreg.REG_SZ, "imageres.dll,54")
+                winreg.SetValueEx(key, "MUIVerb", 0, winreg.REG_SZ, "Стать владельцем")
+
+            dir_command = dir_key + r'\command'
+            winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, dir_command)
+
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, dir_command, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ,
+                                  'cmd.exe /c takeown /f "%1" /r /d y && icacls "%1" /grant администраторы:F /t')
+                winreg.SetValueEx(key, "IsolatedCommand", 0, winreg.REG_SZ,
+                                  'cmd.exe /c takeown /f "%1" /r /d y && icacls "%1" /grant администраторы:F /t')
 
             self.update_menu_items_status()
 
+        except PermissionError as pe:
+            try:
+                if self.take_ownership_registry_key_simple(r'*\shell\runas'):
+                    if self.set_registry_key_permissions_simple(r'*\shell\runas'):
+                        self.add_take_ownership()
+                else:
+                    messagebox.showerror("Ошибка", "Не удалось получить владение ключом реестра")
+            except:
+                messagebox.showerror("Ошибка", "Не удалось добавить пункт 'Стать владельцем'")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {str(e)}")
 
     def remove_take_ownership(self):
-        """Удаление 'Стать владельцем' (HKLM)"""
+        """Удаление 'Стать владельцем' (HKCR)"""
         try:
-            take_ownership_keys = [
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Classes\*\shell\runas\command'),
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Classes\*\shell\runas'),
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Classes\Directory\shell\runas\command'),
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Classes\Directory\shell\runas'),
+            # Удаляем для файлов
+            files_keys = [
+                r'*\shell\runas\command',
+                r'*\shell\runas',
             ]
 
-            for hive, key_path in take_ownership_keys:
+            for key_path in files_keys:
                 try:
-                    winreg.DeleteKey(hive, key_path)
-                except:
+                    winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, key_path)
+                except FileNotFoundError:
+                    pass
+
+            # Удаляем для папок
+            dir_keys = [
+                r'Directory\shell\runas\command',
+                r'Directory\shell\runas',
+            ]
+
+            for key_path in dir_keys:
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, key_path)
+                except FileNotFoundError:
                     pass
 
             self.update_menu_items_status()
 
+        except PermissionError as pe:
+            try:
+                for key_path in [r'*\shell\runas', r'Directory\shell\runas']:
+                    try:
+                        self.delete_registry_key_recursive(winreg.HKEY_CLASSES_ROOT, key_path)
+                    except:
+                        pass
+
+                self.update_menu_items_status()
+            except:
+                messagebox.showerror("Ошибка", "Не удалось удалить пункт 'Стать владельцем'")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
@@ -2395,959 +2594,12 @@ class Module:
             self.update_indicator(item, not exists)
             self.update_menu_items_status()
 
-            if item["name"] in ["Выключение/Перезагрузка/Гибернация", "Диспетчер задач", "Перезапустить explorer",
-                                "Редактор реестра"]:
+            if item["name"] in ["Выключение/Перезагрузка/Гибернация", "Диспетчер задач",
+                                "Перезапустить explorer", "Очистить буфер", "Редактор реестра"]:
                 self.update_desktop_shell_order()
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при переключении пункта: {str(e)}")
-
-    def create_new_menu_tab(self, parent):
-        """Создание вкладки меню Создать"""
-
-        main_container = ttk.Frame(parent)
-        main_container.pack(fill=tk.BOTH, expand=True)
-
-        canvas = tk.Canvas(main_container)
-        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        title_label = ttk.Label(
-            scrollable_frame,
-            text="Управление пунктами меню 'Создать'",
-            font=('Arial', 12, 'bold'),
-            foreground='#2c3e50'
-        )
-        title_label.pack(pady=10)
-
-        control_frame = ttk.Frame(scrollable_frame)
-        control_frame.pack(pady=5)
-
-        center_container = ttk.Frame(control_frame)
-        center_container.pack(expand=True)
-
-        buttons_frame = ttk.Frame(center_container)
-        buttons_frame.pack()
-
-        self.new_menu_toggle_all_btn = ttk.Button(
-            buttons_frame,
-            text="",
-            command=self.toggle_all_new_menu_items,
-            width=15
-        )
-        self.new_menu_toggle_all_btn.pack(side=tk.LEFT, padx=5, pady=5)
-
-        separator = ttk.Separator(scrollable_frame, orient='horizontal')
-        separator.pack(fill=tk.X, padx=10, pady=10)
-
-        self.new_menu_items_frame = ttk.Frame(scrollable_frame)
-        self.new_menu_items_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        self.refresh_new_menu_list()
-
-    def toggle_all_new_menu_items(self):
-        """Переключение всех пунктов меню Создать"""
-        try:
-            items = self.get_new_menu_items()
-            if not items:
-                return
-
-            # Проверяем текущее состояние всех пунктов
-            all_enabled = all(item["enabled"] for item in items)
-            all_disabled = all(not item["enabled"] for item in items)
-
-            # Определяем действие: если есть хоть один включенный - отключаем всё, иначе включаем всё
-            enable_all = all_disabled
-
-            for item in items:
-                try:
-                    if enable_all:
-                        # Включаем все отключенные пункты
-                        if not item["enabled"]:
-                            if item["ext"] == '.folder':
-                                # Особый случай для папки (работа с HKCR)
-                                self.enable_folder_menu_item(item.get("path"))
-                            else:
-                                # Для остальных пунктов (работа с HKLM)
-                                self.enable_new_menu_item(item["ext"], item.get("path"))
-                    else:
-                        # Отключаем все включенные пункты
-                        if item["enabled"]:
-                            if item["ext"] == '.folder':
-                                # Особый случай для папки
-                                self.disable_folder_menu_item(item.get("path"))
-                            else:
-                                # Для остальных пунктов
-                                self.disable_new_menu_item(item["ext"], item.get("path"))
-                except Exception as e:
-                    print(f"Ошибка при переключении пункта {item['name']}: {e}")
-                    # Показываем ошибку только для конкретного пункта
-                    messagebox.showerror("Ошибка", f"Не удалось переключить пункт '{item['name']}': {str(e)}")
-
-            # Обновляем список
-            self.refresh_new_menu_list()
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {str(e)}")
-
-    def refresh_new_menu_list(self):
-        """Обновление списка пунктов меню Создать"""
-        try:
-            for widget in self.new_menu_items_frame.winfo_children():
-                widget.destroy()
-
-            items = self.get_new_menu_items()
-
-            if not items:
-                no_items_label = ttk.Label(
-                    self.new_menu_items_frame,
-                    text="Пункты меню 'Создать' не найдены",
-                    font=('Arial', 10),
-                    foreground='#7f8c8d'
-                )
-                no_items_label.pack(pady=20)
-                return
-
-            all_enabled = all(item["enabled"] for item in items)
-            all_disabled = all(not item["enabled"] for item in items)
-
-            if all_disabled:
-                self.new_menu_toggle_all_btn.config(text="Включить всё")
-            else:
-                self.new_menu_toggle_all_btn.config(text="Отключить всё")
-
-            header_frame = ttk.Frame(self.new_menu_items_frame)
-            header_frame.pack(fill=tk.X, pady=(0, 5))
-
-            ttk.Label(header_frame, text="Название пункта", font=('Arial', 9, 'bold'), width=30).pack(side=tk.LEFT,
-                                                                                                      padx=5)
-            ttk.Label(header_frame, text="Статус", font=('Arial', 9, 'bold'), width=15).pack(side=tk.LEFT, padx=5)
-            ttk.Label(header_frame, text="Действие", font=('Arial', 9, 'bold'), width=15).pack(side=tk.LEFT, padx=0)
-
-            self.new_menu_widgets = []
-            for item in items:
-                self.create_new_menu_item_row(item)
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при обновлении списка: {str(e)}")
-
-    def create_new_menu_item_row(self, item):
-        """Создание строки с пунктом меню Создать"""
-        try:
-            row_frame = ttk.Frame(self.new_menu_items_frame, relief='groove', borderwidth=1)
-            row_frame.pack(fill=tk.X, pady=2, padx=5)
-
-            name_label = ttk.Label(
-                row_frame,
-                text=item["name"],
-                width=29,
-                anchor='w'
-            )
-            name_label.pack(side=tk.LEFT, padx=5, pady=5)
-
-            status_text = "✅ Включен" if item["enabled"] else "❌ Отключен"
-            status_label = ttk.Label(
-                row_frame,
-                text=status_text,
-                width=15,
-                foreground='#27ae60' if item["enabled"] else '#e74c3c'
-            )
-            status_label.pack(side=tk.LEFT, padx=5, pady=5)
-
-            action_text = "Отключить" if item["enabled"] else "Включить"
-            action_btn = ttk.Button(
-                row_frame,
-                text=action_text,
-                width=15,
-                command=lambda ext=item["ext"], path=item.get("path", f'SOFTWARE\\Classes\\{item["ext"]}\\ShellNew'):
-                self.toggle_new_menu_item(ext, path)
-            )
-            action_btn.pack(side=tk.LEFT, padx=5, pady=5)
-
-            self.new_menu_widgets.append({
-                "frame": row_frame,
-                "name": name_label,
-                "status": status_label,
-                "button": action_btn,
-                "ext": item["ext"]
-            })
-
-        except:
-            pass
-
-    def get_new_menu_items(self):
-        """Получение списка пунктов меню Создать (используем HKLM)"""
-        items = []
-        try:
-            folder_ext = '.folder'  # Виртуальное расширение для папки
-            folder_path = r'Folder\ShellNew'
-
-            # Проверяем состояние папки (работа с HKCR)
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, folder_path):
-                    items.append({
-                        "ext": folder_ext,
-                        "name": "Папка",
-                        "enabled": True,
-                        "path": folder_path
-                    })
-            except FileNotFoundError:
-                folder_no_path = folder_path + '_no'
-                try:
-                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, folder_no_path):
-                        items.append({
-                            "ext": folder_ext,
-                            "name": "Папка",
-                            "enabled": False,
-                            "path": folder_path
-                        })
-                except FileNotFoundError:
-                    # Проверяем, может быть вообще нет записи для папки
-                    try:
-                        # Проверяем, есть ли хотя бы ключ Folder
-                        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, 'Folder'):
-                            items.append({
-                                "ext": folder_ext,
-                                "name": "Папка",
-                                "enabled": False,
-                                "path": folder_path
-                            })
-                    except FileNotFoundError:
-                        # Ключа Folder нет вообще
-                        pass
-
-            target_extensions = {
-                '.bmp': r'SOFTWARE\Classes\.bmp\ShellNew',
-                '.contact': r'SOFTWARE\Classes\.contact\ShellNew',
-                '.lnk': r'SOFTWARE\Classes\.lnk\ShellNew',
-                '.rtf': r'SOFTWARE\Classes\.rtf\ShellNew',
-                '.txt': r'SOFTWARE\Classes\.txt\ShellNew',
-                '.zip': r'SOFTWARE\Classes\.zip\CompressedFolder\ShellNew'
-            }
-
-            office_extensions = self.get_office_extensions()
-
-            for ext, path in office_extensions.items():
-                target_extensions[ext] = path
-
-            for ext, base_path in target_extensions.items():
-                if not base_path:
-                    continue
-
-                shellnew_path = base_path
-                shellnew_no_path = base_path + '_no'
-
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                        items.append({
-                            "ext": ext,
-                            "name": self.get_file_type_name(ext),
-                            "enabled": True,
-                            "path": base_path
-                        })
-                except FileNotFoundError:
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
-                            items.append({
-                                "ext": ext,
-                                "name": self.get_file_type_name(ext),
-                                "enabled": False,
-                                "path": base_path
-                            })
-                    except FileNotFoundError:
-                        if ext in office_extensions:
-                            try:
-                                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, f"SOFTWARE\\Classes\\{ext}"):
-                                    items.append({
-                                        "ext": ext,
-                                        "name": self.get_file_type_name(ext),
-                                        "enabled": False,
-                                        "path": base_path
-                                    })
-                            except FileNotFoundError:
-                                if ext == '.docx':
-                                    try:
-                                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                                            f"SOFTWARE\\Classes\\{ext}\\Word.Document.12"):
-                                            items.append({
-                                                "ext": ext,
-                                                "name": self.get_file_type_name(ext),
-                                                "enabled": False,
-                                                "path": base_path
-                                            })
-                                    except FileNotFoundError:
-                                        pass
-                                elif ext == '.xlsx':
-                                    try:
-                                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                                            f"SOFTWARE\\Classes\\{ext}\\Excel.Sheet.12"):
-                                            items.append({
-                                                "ext": ext,
-                                                "name": self.get_file_type_name(ext),
-                                                "enabled": False,
-                                                "path": base_path
-                                            })
-                                    except FileNotFoundError:
-                                        pass
-                                elif ext == '.pptx':
-                                    try:
-                                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                                                            f"SOFTWARE\\Classes\\{ext}\\PowerPoint.Show.12"):
-                                            items.append({
-                                                "ext": ext,
-                                                "name": self.get_file_type_name(ext),
-                                                "enabled": False,
-                                                "path": base_path
-                                            })
-                                    except FileNotFoundError:
-                                        pass
-                except:
-                    pass
-
-        except Exception as e:
-            print(f"Ошибка в get_new_menu_items: {e}")
-
-        return items
-
-    def get_office_extensions(self):
-        """Получение списка расширений Microsoft Office, если он установлен"""
-        office_extensions = {}
-
-        office_installed = False
-
-        try:
-            office_versions = [
-                r'SOFTWARE\Microsoft\Office\16.0',
-                r'SOFTWARE\Microsoft\Office\15.0',
-                r'SOFTWARE\Microsoft\Office\14.0',
-                r'SOFTWARE\Microsoft\Office\12.0',
-                r'SOFTWARE\Microsoft\Office\11.0'
-            ]
-
-            for version_path in office_versions:
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, version_path):
-                        office_installed = True
-                        break
-                except:
-                    continue
-
-            if not office_installed:
-                for version_path in office_versions:
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, version_path):
-                            office_installed = True
-                            break
-                    except:
-                        continue
-
-            if not office_installed:
-                try:
-                    uninstall_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, uninstall_key) as key:
-                        i = 0
-                        while True:
-                            try:
-                                subkey_name = winreg.EnumKey(key, i)
-                                subkey_path = f"{uninstall_key}\\{subkey_name}"
-                                try:
-                                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey_path) as subkey:
-                                        display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
-                                        display_name_str = str(display_name)
-                                        if "Microsoft Office" in display_name_str or "Microsoft Word" in display_name_str or "Microsoft Excel" in display_name_str or "Microsoft PowerPoint" in display_name_str:
-                                            office_installed = True
-                                            break
-                                except:
-                                    pass
-                                i += 1
-                            except OSError:
-                                break
-                except:
-                    pass
-
-        except:
-            pass
-
-        if office_installed:
-            office_exts = ['.docx', '.xlsx', '.pptx', '.pub']
-
-            for ext in office_exts:
-                possible_paths = [
-                    f'SOFTWARE\\Classes\\{ext}\\ShellNew',
-                    f'SOFTWARE\\Classes\\SystemFileAssociations\\{ext}\\ShellNew'
-                ]
-
-                if ext == '.docx':
-                    possible_paths.insert(0, r'SOFTWARE\Classes\.docx\Word.Document.12\ShellNew')
-                elif ext == '.xlsx':
-                    possible_paths.insert(0, r'SOFTWARE\Classes\.xlsx\Excel.Sheet.12\ShellNew')
-                elif ext == '.pptx':
-                    possible_paths.insert(0, r'SOFTWARE\Classes\.pptx\PowerPoint.Show.12\ShellNew')
-                elif ext == '.pub':
-                    possible_paths.insert(0, r'SOFTWARE\Classes\.pub\Publisher.Document.12\ShellNew')
-
-                found_path = None
-                for path in possible_paths:
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path):
-                            found_path = path
-                            break
-                    except:
-                        continue
-
-                if found_path:
-                    office_extensions[ext] = found_path
-                else:
-                    office_extensions[ext] = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
-
-        return office_extensions
-
-    def get_file_type_name(self, ext):
-        """Получение читаемого имени для расширения файла"""
-        basic_names = {
-            '.folder': 'Папка',
-            '.bmp': 'Рисунок BMP',
-            '.contact': 'Контакт',
-            '.lnk': 'Ярлык',
-            '.rtf': 'Документ RTF',
-            '.txt': 'Текстовый документ',
-            '.zip': 'Архив ZIP',
-            '.docx': 'Документ Word',
-            '.xlsx': 'Книга Excel',
-            '.pptx': 'Презентация PowerPoint',
-            '.pub': 'Публикация Publisher'
-        }
-
-        if ext in basic_names:
-            return basic_names[ext]
-        else:
-            clean_ext = ext.lstrip('.')
-            return f"Файл {clean_ext.upper()}"
-
-    def toggle_new_menu_item(self, ext, base_path=None):
-        """Переключение состояния пункта меню Создать (HKLM)"""
-        try:
-            # Особый случай для папки
-            if ext == '.folder':
-                if base_path is None:
-                    base_path = r'Folder\ShellNew'
-
-                return self.toggle_folder_menu_item(base_path)
-
-            if base_path is None:
-                base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
-
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                    if not self.disable_new_menu_item(ext, base_path):
-                        messagebox.showerror("Ошибка", f"Не удалось отключить пункт '{self.get_file_type_name(ext)}'")
-                    self.refresh_new_menu_list()
-                    return
-            except FileNotFoundError:
-                pass
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
-                    if not self.enable_new_menu_item(ext, base_path):
-                        messagebox.showerror("Ошибка", f"Не удалось включить пункт '{self.get_file_type_name(ext)}'")
-                    self.refresh_new_menu_list()
-                    return
-            except FileNotFoundError:
-                if ext in ['.docx', '.xlsx', '.pptx', '.pub']:
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, f"SOFTWARE\\Classes\\{ext}"):
-                            pass
-                        if not self.enable_new_menu_item(ext, base_path):
-                            messagebox.showerror("Ошибка", f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
-                        self.refresh_new_menu_list()
-                        return
-                    except FileNotFoundError:
-                        if ext == '.docx':
-                            alt_path = r'SOFTWARE\Classes\.docx\Word.Document.12'
-                        elif ext == '.xlsx':
-                            alt_path = r'SOFTWARE\Classes\.xlsx\Excel.Sheet.12'
-                        elif ext == '.pptx':
-                            alt_path = r'SOFTWARE\Classes\.pptx\PowerPoint.Show.12'
-                        elif ext == '.pub':
-                            alt_path = r'SOFTWARE\Classes\.pub\Publisher.Document.12'
-                        else:
-                            alt_path = None
-
-                        if alt_path:
-                            try:
-                                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, alt_path):
-                                    if not self.enable_new_menu_item(ext, base_path):
-                                        messagebox.showerror("Ошибка",
-                                                             f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
-                                    self.refresh_new_menu_list()
-                                    return
-                            except FileNotFoundError:
-                                messagebox.showinfo("Информация",
-                                                    f"Microsoft Office не установлен или тип файла {ext} не ассоциирован")
-                                return
-                        else:
-                            messagebox.showinfo("Информация",
-                                                f"Microsoft Office не установлен или тип файла {ext} не ассоциирован")
-                            return
-                else:
-                    if not self.enable_new_menu_item(ext, base_path):
-                        messagebox.showerror("Ошибка", f"Не удалось создать пункт '{self.get_file_type_name(ext)}'")
-                    self.refresh_new_menu_list()
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пункта: {str(e)}")
-
-    def toggle_folder_menu_item(self, base_path):
-        """Переключение пункта 'Папка' в меню Создать"""
-        try:
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
-                    if not self.disable_folder_menu_item(base_path):
-                        messagebox.showerror("Ошибка", "Не удалось отключить пункт 'Папка'")
-                    self.refresh_new_menu_list()
-                    return True
-            except FileNotFoundError:
-                pass
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
-                    if not self.enable_folder_menu_item(base_path):
-                        messagebox.showerror("Ошибка", "Не удалось включить пункт 'Папка'")
-                    self.refresh_new_menu_list()
-                    return True
-            except FileNotFoundError:
-                if not self.enable_folder_menu_item(base_path):
-                    messagebox.showerror("Ошибка", "Не удалось создать пункт 'Папка'")
-                self.refresh_new_menu_list()
-                return True
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пункта 'Папка': {str(e)}")
-            return False
-
-    def enable_folder_menu_item(self, base_path):
-        """Включение пункта 'Папка' в меню Создать"""
-        try:
-            if base_path is None:
-                base_path = r'Folder\ShellNew'
-
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            # Сначала пытаемся переименовать из _no в обычный
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
-                    if self.rename_registry_key(winreg.HKEY_CLASSES_ROOT, shellnew_no_path, shellnew_path):
-                        return True
-                    else:
-                        raise Exception("Не удалось переименовать ключ папки")
-            except FileNotFoundError:
-                pass
-
-            # Если нет _no, проверяем может ключ уже существует
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
-                    # Ключ уже существует и включен
-                    return True
-            except FileNotFoundError:
-                # Если ключа нет вообще, создаем минимальную запись для папки
-                try:
-                    winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, shellnew_path)
-                    with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path, 0, winreg.KEY_SET_VALUE) as key:
-                        winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                    return True
-                except Exception as e:
-                    raise Exception(f"Не удалось создать ключ папки: {e}")
-
-        except Exception as e:
-            print(f"Ошибка в enable_folder_menu_item: {e}")
-            return False
-
-    def disable_folder_menu_item(self, base_path):
-        """Отключение пункта 'Папка' в меню Создать"""
-        try:
-            if base_path is None:
-                base_path = r'Folder\ShellNew'
-
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            # Проверяем, существует ли уже отключенная версия
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_no_path):
-                    # Уже отключено
-                    return True
-            except FileNotFoundError:
-                pass
-
-            # Пытаемся переименовать обычный ключ в _no
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shellnew_path):
-                    if self.rename_registry_key(winreg.HKEY_CLASSES_ROOT, shellnew_path, shellnew_no_path):
-                        return True
-                    else:
-                        raise Exception("Не удалось переименовать ключ папки")
-            except FileNotFoundError:
-                # Если ключа нет, значит он уже отключен или не существует
-                return True
-
-        except Exception as e:
-            print(f"Ошибка в disable_folder_menu_item: {e}")
-            return False
-
-    def enable_new_menu_item(self, ext, base_path=None):
-        """Включение пункта в меню Создать (HKLM)"""
-        try:
-            if base_path is None:
-                base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
-
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            try:
-                # Пытаемся переименовать из _no в обычный
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
-                    if self.rename_registry_key(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path, shellnew_path):
-                        return True
-                    else:
-                        raise Exception(f"Не удалось переименовать ключ для {ext}")
-            except FileNotFoundError:
-                # Если нет _no, проверяем может ключ уже существует
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                        # Ключ уже существует и включен
-                        return True
-                except FileNotFoundError:
-                    # Если ключа нет вообще, создаем его
-                    try:
-                        if ext in ['.docx', '.xlsx', '.pptx', '.pub']:
-                            return self.create_office_shellnew_entry(ext, shellnew_path)
-                        else:
-                            return self.create_basic_shellnew_entry(ext, shellnew_path)
-                    except Exception as e:
-                        raise Exception(f"Не удалось создать ключ для {ext}: {e}")
-
-        except Exception as e:
-            print(f"Ошибка в enable_new_menu_item для {ext}: {e}")
-            return False
-
-    def disable_new_menu_item(self, ext, base_path=None):
-        """Отключение пункта в меню Создать (HKLM)"""
-        try:
-            if base_path is None:
-                base_path = f'SOFTWARE\\Classes\\{ext}\\ShellNew'
-
-            shellnew_path = base_path
-            shellnew_no_path = base_path + '_no'
-
-            # Проверяем, существует ли уже отключенная версия
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_no_path):
-                    # Уже отключено
-                    return True
-            except FileNotFoundError:
-                pass
-
-            # Пытаемся переименовать обычный ключ в _no
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path):
-                    if self.rename_registry_key(winreg.HKEY_LOCAL_MACHINE, shellnew_path, shellnew_no_path):
-                        return True
-                    else:
-                        raise Exception(f"Не удалось переименовать ключ для {ext}")
-            except FileNotFoundError:
-                # Если ключа нет, значит он уже отключен или не существует
-                return True
-
-        except Exception as e:
-            print(f"Ошибка в disable_new_menu_item для {ext}: {e}")
-            return False
-
-    def create_office_shellnew_entry(self, ext, shellnew_path):
-        """Создание записи ShellNew для файлов Office"""
-        try:
-            winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path)
-
-            template_names = {
-                '.docx': 'Word.Document.12',
-                '.xlsx': 'Excel.Sheet.12',
-                '.pptx': 'PowerPoint.Show.12',
-                '.pub': 'Publisher.Document.12'
-            }
-
-            template_name = template_names.get(ext, '')
-
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-
-                if ext in ['.docx', '.xlsx', '.pptx']:
-                    winreg.SetValueEx(key, "FileName", 0, winreg.REG_SZ, template_name)
-
-            return True
-
-        except:
-            try:
-                command_path = shellnew_path + r'\command'
-                winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, command_path)
-
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, command_path, 0, winreg.KEY_SET_VALUE) as cmd_key:
-                    cmd_value = f'cmd.exe /c echo. > "%1{ext}"'
-                    winreg.SetValueEx(cmd_key, "", 0, winreg.REG_SZ, cmd_value)
-
-                return True
-
-            except:
-                return False
-
-    def create_basic_shellnew_entry(self, ext, shellnew_path):
-        """Создание базовой записи ShellNew"""
-        try:
-            winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path)
-
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, shellnew_path, 0, winreg.KEY_SET_VALUE) as key:
-                # Для разных типов файлов разные параметры
-                if ext == '.bmp':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                elif ext == '.txt':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                elif ext == '.rtf':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                elif ext == '.lnk':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                elif ext == '.contact':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                elif ext == '.zip':
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-                else:
-                    winreg.SetValueEx(key, "NullFile", 0, winreg.REG_SZ, "")
-
-            return True
-        except Exception as e:
-            print(f"Ошибка создания базового ShellNew для {ext}: {e}")
-            return False
-
-    def create_sendto_menu_tab(self, parent):
-        """Создание вкладки меню Отправить"""
-
-        title_label = ttk.Label(
-            parent,
-            text="Управление пунктами меню 'Отправить'",
-            font=('Arial', 12, 'bold'),
-            foreground='#2c3e50'
-        )
-        title_label.pack(pady=10)
-
-        control_frame = ttk.Frame(parent)
-        control_frame.pack(pady=5)
-
-        center_container = ttk.Frame(control_frame)
-        center_container.pack(expand=True)
-
-        buttons_frame = ttk.Frame(center_container)
-        buttons_frame.pack()
-
-        self.sendto_toggle_all_btn = ttk.Button(
-            buttons_frame,
-            text="",
-            command=self.toggle_all_sendto_items,
-            width=15
-        )
-        self.sendto_toggle_all_btn.pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.toggle_selected_btn = ttk.Button(
-            buttons_frame,
-            text="Включить",
-            command=self.toggle_selected_sendto_item,
-            width=15
-        )
-        self.toggle_selected_btn.pack(side=tk.LEFT, padx=5, pady=5)
-
-        self.sendto_listbox = tk.Listbox(parent, height=15, font=('Arial', 9))
-        self.sendto_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        self.sendto_listbox.bind('<<ListboxSelect>>', self.on_sendto_selection)
-
-        self.refresh_sendto_list()
-
-    def toggle_all_sendto_items(self):
-        """Переключение всех пунктов меню Отправить"""
-        try:
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'SendTo')
-
-            if not os.path.exists(sendto_path):
-                messagebox.showerror("Ошибка", "Папка SendTo не найдена")
-                return
-
-            items = os.listdir(sendto_path)
-
-            has_enabled_items = False
-            has_disabled_items = False
-
-            for item in items:
-                if item.lower() == "desktop.ini":
-                    continue
-
-                if item.endswith('.DeskLink_no'):
-                    has_disabled_items = True
-                else:
-                    has_enabled_items = True
-
-            all_disabled = has_disabled_items and not has_enabled_items
-
-            for item in items:
-                item_path = os.path.join(sendto_path, item)
-
-                if item.lower() == "desktop.ini":
-                    continue
-
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    if all_disabled:
-                        if item.endswith('.DeskLink_no'):
-                            original_name = item[:-12]
-                            disabled_path = item_path
-                            enabled_path = os.path.join(sendto_path, original_name)
-
-                            try:
-                                if os.path.exists(disabled_path) and not os.path.exists(enabled_path):
-                                    os.rename(disabled_path, enabled_path)
-                            except:
-                                pass
-                    else:
-                        if not item.endswith('.DeskLink_no'):
-                            disabled_path = os.path.join(sendto_path, f"{item}.DeskLink_no")
-                            enabled_path = item_path
-
-                            try:
-                                if os.path.exists(enabled_path) and not os.path.exists(disabled_path):
-                                    os.rename(enabled_path, disabled_path)
-                            except:
-                                pass
-
-            self.refresh_sendto_list()
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {str(e)}")
-
-    def on_sendto_selection(self, event):
-        """Обработчик выбора пункта в меню Отправить"""
-        selection = self.sendto_listbox.curselection()
-        if selection:
-            item_text = self.sendto_listbox.get(selection[0])
-            if "❌" in item_text:
-                self.toggle_selected_btn.config(text="Включить")
-            else:
-                self.toggle_selected_btn.config(text="Отключить")
-
-    def toggle_selected_sendto_item(self):
-        """Переключение состояния выделенного пункта в меню Отправить"""
-        try:
-            selection = self.sendto_listbox.curselection()
-            if not selection:
-                messagebox.showinfo("Информация", "Выберите пункт из списка")
-                return
-
-            item_text = self.sendto_listbox.get(selection[0])
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'SendTo')
-
-            if "❌" in item_text:
-                original_name = item_text[2:].replace(" (отключен)", "")
-                item_path = os.path.join(sendto_path, f"{original_name}.DeskLink_no")
-                enabled_path = os.path.join(sendto_path, original_name)
-
-                try:
-                    if os.path.exists(item_path) and not os.path.exists(enabled_path):
-                        os.rename(item_path, enabled_path)
-                        self.refresh_sendto_list()
-                    else:
-                        messagebox.showinfo("Информация", f"Пункт '{original_name}' уже включен или не найден")
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось включить пункт: {str(e)}")
-            else:
-                if "✅" in item_text:
-                    original_name = item_text[2:]
-                else:
-                    original_name = item_text
-
-                item_path = os.path.join(sendto_path, original_name)
-                disabled_path = os.path.join(sendto_path, f"{original_name}.DeskLink_no")
-
-                try:
-                    if os.path.exists(item_path) and not os.path.exists(disabled_path):
-                        os.rename(item_path, disabled_path)
-                        self.refresh_sendto_list()
-                    else:
-                        messagebox.showinfo("Информация", f"Пункт '{original_name}' уже отключен или не найден")
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось отключить пункт: {str(e)}")
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пункта: {str(e)}")
-
-    def refresh_sendto_list(self):
-        """Обновление списка пунктов меню Отправить"""
-        try:
-            self.sendto_listbox.delete(0, tk.END)
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'SendTo')
-
-            if not os.path.exists(sendto_path):
-                self.sendto_listbox.insert(0, "Папка SendTo не найдена")
-                return
-
-            items = os.listdir(sendto_path)
-
-            if not items:
-                self.sendto_listbox.insert(0, "Папка SendTo пуста")
-                return
-
-            has_enabled_items = False
-            has_disabled_items = False
-
-            display_items = []
-
-            for item in sorted(items):
-                if item.lower() == "desktop.ini":
-                    continue
-
-                item_path = os.path.join(sendto_path, item)
-
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    if item.endswith('.DeskLink_no'):
-                        original_name = item[:-12]
-                        display_text = f"❌ {original_name} (отключен)"
-                        has_disabled_items = True
-                    else:
-                        display_text = f"✅ {item}"
-                        has_enabled_items = True
-
-                    display_items.append((item, display_text))
-
-            if has_enabled_items or (not has_enabled_items and not has_disabled_items):
-                self.sendto_toggle_all_btn.config(text="Отключить всё")
-            else:
-                self.sendto_toggle_all_btn.config(text="Включить всё")
-
-            for _, display_text in display_items:
-                self.sendto_listbox.insert(tk.END, display_text)
-
-        except Exception as e:
-            self.sendto_listbox.insert(0, f"Ошибка: {e}")
 
     def update_menu_items_status(self):
         """Обновление статусов всех пунктов меню"""
@@ -3653,11 +2905,3 @@ class Module:
             return True
         except:
             raise
-
-    def show(self):
-        """Показать модуль"""
-        self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    def hide(self):
-        """Скрыть модуль"""
-        self.frame.pack_forget()

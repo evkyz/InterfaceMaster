@@ -4,8 +4,8 @@
 # http://msdn.microsoft.com/en-us/library/ms646997.aspx
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 3, 140),
-    prodvers=(2, 0, 3, 140),
+    filevers=(2, 1, 0, 170),
+    prodvers=(2, 1, 0, 170),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -20,12 +20,12 @@ VSVersionInfo(
         u'040904b0',
         [StringStruct(u'CompanyName', u'EvKyz'),
         StringStruct(u'FileDescription', u'Настройка интерфейса Windows'),
-        StringStruct(u'FileVersion', u'2.0.3.140'),
+        StringStruct(u'FileVersion', u'2.1.0.170'),
         StringStruct(u'InternalName', u'interfacemaster.exe'),
         StringStruct(u'LegalCopyright', u'EvKyz'),
         StringStruct(u'OriginalFilename', u'InterfaceMaster'),
         StringStruct(u'ProductName', u'Interface Master'),
-        StringStruct(u'ProductVersion', u'2.0.3.140')])
+        StringStruct(u'ProductVersion', u'2.1.0.170')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
   ]

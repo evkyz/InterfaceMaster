@@ -119,7 +119,7 @@ class DLLChecker:
 
     @staticmethod
     def copy_dll_to_system32(dll_path):
-        """Копирует DLL файл в System32"""
+        """Копирует DLL файл в System32 (без лишних вопросов)"""
         try:
             if not dll_path or not os.path.exists(dll_path):
                 return False, "Исходный файл DLL не найден"
@@ -128,38 +128,10 @@ class DLLChecker:
 
             import ctypes
 
-            if os.path.exists(system32_path):
-                existing_hash = calculate_sha1(system32_path)
-                source_hash = calculate_sha1(dll_path)
-
-                # Проверяем, является ли существующий хеш валидным
-                expected_hashes = InterfaceMaster.DLLCheckerInternal.VALID_HASHES
-
-                if existing_hash in expected_hashes:
-                    # Если существующий файл уже имеет валидный хеш
-                    # Не предлагаем замену, даже если хеши разные
-                    return True, None  # Возвращаем None, файл уже валиден
-                else:
-                    # Если существующий файл имеет невалидный хеш
-                    root = tk.Tk()
-                    root.withdraw()
-
-                    response = messagebox.askyesno(
-                        "Перезапись файла",
-                        "Файл imaster.dll уже существует в System32 с другим хешем\n"
-                        f"Хеш существующего файла: {existing_hash if existing_hash else 'Не удалось вычислить'}\n"
-                        f"Хеш для копирования: {source_hash}\n\n"
-                        "Хотите перезаписать его?"
-                    )
-                    root.destroy()
-
-                    if not response:
-                        return False, None
-
+            # Просто копируем файл, перезаписывая существующий
             shutil.copy2(dll_path, system32_path)
 
             if os.path.exists(system32_path):
-                # Сохраняем путь в реестр после успешного копирования
                 DLLChecker.save_dll_path_to_registry(system32_path)
                 DLLChecker.initialize()
                 return True, "Файл успешно скопирован в System32"
@@ -167,82 +139,9 @@ class DLLChecker:
                 return False, "Не удалось скопировать файл"
 
         except PermissionError:
-            return False, "Отказано в доступе"
+            return False, "Отказано в доступе. Попробуйте запустить программу от имени администратора."
         except Exception as e:
             return False, f"Ошибка при копировании: {str(e)}"
-
-    @staticmethod
-    def check_registry_for_dll_path():
-        """
-        Проверяет реестр на наличие пути к imaster.dll
-        Возвращает путь, если он найден в реестре, иначе None
-        """
-        registry_paths = [
-            (winreg.HKEY_CURRENT_USER,
-             r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon"),
-            (winreg.HKEY_CURRENT_USER,
-             r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon"),
-            (winreg.HKEY_CURRENT_USER,
-             r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon"),
-            (winreg.HKEY_CURRENT_USER,
-             r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon"),
-            (winreg.HKEY_CURRENT_USER,
-             r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{26EE0668-A00A-44D7-9371-BEB064C98683}\DefaultIcon"),
-
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons"),
-
-            (winreg.HKEY_CLASSES_ROOT, r"DesktopBackground\Shell\Reboot"),
-            (winreg.HKEY_CLASSES_ROOT, r"DesktopBackground\Shell\Hibernation"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\DesktopBackground\Shell\Reboot"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\DesktopBackground\Shell\Hibernation"),
-            (winreg.HKEY_CURRENT_USER, r"Software\Classes\DesktopBackground\Shell\Reboot"),
-            (winreg.HKEY_CURRENT_USER, r"Software\Classes\DesktopBackground\Shell\Hibernation"),
-        ]
-
-        for hive, path in registry_paths:
-            try:
-                with winreg.OpenKey(hive, path) as key:
-                    if "DriveIcons" in path:
-                        try:
-                            for i in range(winreg.QueryInfoKey(key)[0]):
-                                drive_letter = winreg.EnumKey(key, i)
-                                try:
-                                    subkey_path = f"{path}\\{drive_letter}\\DefaultIcon"
-                                    with winreg.OpenKey(hive, subkey_path) as subkey:
-                                        value, _ = winreg.QueryValueEx(subkey, "")
-                                        if "imaster.dll" in value.lower():
-                                            dll_path = value.split(",")[0]
-                                            if os.path.exists(dll_path):
-                                                return dll_path
-                                except:
-                                    continue
-                        except:
-                            continue
-                    else:
-                        try:
-                            value, _ = winreg.QueryValueEx(key, "")
-                            if "imaster.dll" in value.lower():
-                                dll_path = value.split(",")[0]
-                                if os.path.exists(dll_path):
-                                    return dll_path
-                        except:
-                            try:
-                                value, _ = winreg.QueryValueEx(key, "Icon")
-                                if "imaster.dll" in value.lower():
-                                    dll_path = value.split(",")[0]
-                                    if os.path.exists(dll_path):
-                                        return dll_path
-                            except:
-                                continue
-            except:
-                continue
-
-        return None
-
-    @staticmethod
-    def is_dll_in_registry():
-        """Проверяет, используется ли imaster.dll в реестре"""
-        return DLLChecker.check_registry_for_dll_path() is not None
 
     @staticmethod
     def get_dll_status():
@@ -259,52 +158,32 @@ class DLLChecker:
             if system32_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
                 system32_hash_match = True
 
-        # Проверяем сохраненный путь из реестра программы
         saved_dll_path = DLLChecker.get_dll_path_from_registry()
-        saved_path_valid = saved_dll_path and os.path.exists(saved_dll_path)
-        
-        registry_dll_path = DLLChecker.check_registry_for_dll_path()
-        dll_in_registry = registry_dll_path is not None
+        saved_path_valid = False
+        if saved_dll_path and os.path.exists(saved_dll_path):
+            saved_hash = calculate_sha1(saved_dll_path)
+            if saved_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
+                saved_path_valid = True
 
         # Определяем рекомендуемый путь
         if saved_path_valid:
-            # Проверяем хеш сохраненного файла
-            saved_hash = calculate_sha1(saved_dll_path)
-            if saved_hash in InterfaceMaster.DLLCheckerInternal.VALID_HASHES:
-                recommended_path = saved_dll_path
-                source = "saved_registry"
-            else:
-                saved_path_valid = False
-                recommended_path = None
-                source = "none"
+            recommended_path = saved_dll_path
+            source = "saved_registry"
+        elif system32_dll_exists and system32_hash_match:
+            recommended_path = system32_path
+            source = "system32"
+        elif dll_info['dll_found'] and dll_info['hash_match']:
+            recommended_path = dll_info['dll_path']
+            source = "found"
         else:
             recommended_path = None
             source = "none"
 
-        if not recommended_path:
-            if dll_in_registry and registry_dll_path:
-                recommended_path = registry_dll_path
-                source = "registry"
-            elif system32_dll_exists and system32_hash_match:
-                recommended_path = system32_path
-                source = "system32"
-            elif dll_info['dll_found'] and dll_info['hash_match']:
-                recommended_path = dll_info['dll_path']
-                source = "found"
-            else:
-                recommended_path = None
-                source = "none"
-
-        # Сохраняем путь в реестр программы если нашли валидный
-        if recommended_path and source != "saved_registry":
-            DLLChecker.save_dll_path_to_registry(recommended_path)
-
+        # Условие для предложения копирования/замены
         should_offer_copy = (
-                dll_info['dll_found'] and
-                dll_info['hash_match'] and
-                not (system32_dll_exists and system32_hash_match) and
-                not dll_in_registry and
-                not saved_path_valid
+            dll_info['dll_found'] and
+            dll_info['hash_match'] and
+            (not system32_dll_exists or not system32_hash_match)
         )
 
         return {
@@ -315,10 +194,9 @@ class DLLChecker:
             'recommended_path': recommended_path,
             'should_offer_copy': should_offer_copy,
             'is_in_system32': system32_dll_exists and system32_hash_match,
-            'is_in_registry': dll_in_registry,
-            'registry_path': registry_dll_path,
             'saved_path': saved_dll_path,
-            'source': source
+            'source': source,
+            'saved_path_valid': saved_path_valid
         }
 
     @staticmethod
@@ -329,48 +207,50 @@ class DLLChecker:
         """
         dll_status = DLLChecker.get_dll_status()
 
-        if DLLChecker.copy_offered:
-            return dll_status['recommended_path']
-
-        if dll_status['is_in_registry'] or dll_status['is_in_system32']:
-            return dll_status['recommended_path']
-
+        # Проверяем, нужно ли предлагать копирование
         if not dll_status['should_offer_copy']:
+            return dll_status['recommended_path']
+
+        # Предотвращаем множественные предложения
+        if DLLChecker.copy_offered:
             return dll_status['recommended_path']
 
         DLLChecker.copy_offered = True
 
+        # Формируем сообщение в зависимости от ситуации
+        if dll_status['system32_exists'] and not dll_status['system32_hash_match']:
+            message_text = (
+                f"Файл imaster.dll в System32 повреждён!\n\n"
+                f"Хотите заменить файл в C:\\Windows\\System32?\n\n"
+            )
+        else:
+            message_text = (
+                f"Хотите скопировать файл в C:\\Windows\\System32?\n\n"
+            )
+
         response = messagebox.askyesno(
             "Копирование DLL",
-            f"Рекомендуется скопировать файл imaster.dll в System32\n\n"
-            f"Текущее расположение: {dll_status['dll_path']}\n"
-            f"Хеш файла: {dll_status['actual_hash']}\n\n"
-            f"Хотите скопировать файл в C:\\Windows\\System32?\n\n"
-            f"Это обеспечит стабильную работу программы при любом расположении."
+            message_text
         )
 
         if response:
             success, message = DLLChecker.copy_dll_to_system32(dll_status['dll_path'])
 
             if success:
-                # Показываем сообщение об успехе только если оно есть
                 if message:
                     messagebox.showinfo("Успех", message)
                 DLLChecker.initialize()
-                # Сохраняем путь в реестр
                 DLLChecker.save_dll_path_to_registry(dll_status['system32_path'])
                 return dll_status['system32_path']
             else:
-                # Показываем предупреждение только если есть сообщение об ошибке
                 if message:
                     messagebox.showwarning("Предупреждение",
                                            f"Не удалось скопировать файл:\n{message}\n\n"
                                            f"Будет использовано текущее расположение")
-                # Сохраняем текущий путь в реестр
                 DLLChecker.save_dll_path_to_registry(dll_status['dll_path'])
                 return dll_status['dll_path']
         else:
-            # Сохраняем текущий путь в реестр
+            # Пользователь отказался - сохраняем текущий путь в реестр
             DLLChecker.save_dll_path_to_registry(dll_status['dll_path'])
             return dll_status['dll_path']
 
@@ -390,11 +270,7 @@ class DLLChecker:
 
         if not dll_status['hash_match']:
             if parent_window and module_name in ["desktop", "disk"]:
-                valid_hashes = InterfaceMaster.DLLCheckerInternal.VALID_HASHES
-                messagebox.showwarning("Внимание",
-                                       f"Файл imaster.dll поврежден!\n\n"
-                                       f"Допустимые хеши: {', '.join(valid_hashes)}\n"
-                                       f"Фактический хеш: {dll_status['actual_hash']}")
+                messagebox.showwarning("Внимание", "Файл imaster.dll поврежден!")
             return None
 
         if module_name in ["desktop", "disk"]:
@@ -412,12 +288,6 @@ class DLLChecker:
 
         if not dll_status['dll_found'] or not dll_status['hash_match']:
             return None
-
-        if dll_status['is_in_registry']:
-            return dll_status['registry_path']
-
-        if dll_status['is_in_system32']:
-            return dll_status['system32_path']
 
         return dll_status['recommended_path']
 
@@ -437,106 +307,27 @@ class InterfaceMaster:
         def __init__(self, base_path):
             self.base_path = base_path
 
-        def search_dll_in_registry(self):
-            """Поиск imaster.dll в реестре Windows"""
-            dll_paths = set()
-
-            try:
-                key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons"
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
-                    for i in range(winreg.QueryInfoKey(key)[0]):
-                        drive_letter = winreg.EnumKey(key, i)
-                        try:
-                            subkey_path = f"{key_path}\\{drive_letter}\\DefaultIcon"
-                            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey_path) as subkey:
-                                value, _ = winreg.QueryValueEx(subkey, "")
-                                if "imaster.dll" in value.lower():
-                                    dll_paths.add(value.split(",")[0])
-                        except:
-                            continue
-            except:
-                pass
-
-            clsid_paths = [
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon",
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon",
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon",
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon",
-                r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{26EE0668-A00A-44D7-9371-BEB064C98683}\DefaultIcon"
+        def search_dll_in_filesystem(self):
+            """Поиск imaster.dll в файловой системе (только правильные версии)"""
+            search_locations = [
+                (r"C:\Windows\System32\imaster.dll", "System32"),
+                (os.path.join(self.base_path, "imaster.dll"), "Папка exe"),
+                (os.path.join(os.getcwd(), "imaster.dll"), "Рабочая папка"),
+                (os.path.join(os.path.dirname(self.base_path), "imaster.dll"), "Родительская от exe"),
+                (os.path.join(os.path.dirname(os.getcwd()), "imaster.dll"), "Родительская от рабочей"),
+                (r"C:\Windows\SysWOW64\imaster.dll", "SysWOW64"),
+                (r"C:\Windows\imaster.dll", "Windows"),
+                (r"C:\imaster.dll", "Корень C"),
             ]
 
-            for clsid_path in clsid_paths:
-                try:
-                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, clsid_path) as key:
-                        value, _ = winreg.QueryValueEx(key, "")
-                        if "imaster.dll" in value.lower():
-                            dll_paths.add(value.split(",")[0])
-                except:
-                    continue
+            for file_path, description in search_locations:
+                if os.path.exists(file_path):
+                    # Проверяем хеш
+                    file_hash = calculate_sha1(file_path)
+                    if file_hash and file_hash in self.VALID_HASHES:
+                        return file_path
 
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"DesktopBackground\Shell\Reboot") as key:
-                    try:
-                        value_default, _ = winreg.QueryValueEx(key, "")
-                        if "imaster.dll" in value_default.lower():
-                            dll_paths.add(value_default.split(",")[0])
-                    except:
-                        pass
-
-                    try:
-                        value_icon, _ = winreg.QueryValueEx(key, "Icon")
-                        if "imaster.dll" in value_icon.lower():
-                            dll_paths.add(value_icon.split(",")[0])
-                    except:
-                        pass
-            except:
-                pass
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"DesktopBackground\Shell\Hibernation") as key:
-                    try:
-                        value_default, _ = winreg.QueryValueEx(key, "")
-                        if "imaster.dll" in value_default.lower():
-                            dll_paths.add(value_default.split(",")[0])
-                    except:
-                        pass
-
-                    try:
-                        value_icon, _ = winreg.QueryValueEx(key, "Icon")
-                        if "imaster.dll" in value_icon.lower():
-                            dll_paths.add(value_icon.split(",")[0])
-                    except:
-                        pass
-            except:
-                pass
-
-            additional_paths = [
-                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\DesktopBackground\Shell\Reboot"),
-                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Classes\DesktopBackground\Shell\Hibernation"),
-                (winreg.HKEY_CURRENT_USER, r"Software\Classes\DesktopBackground\Shell\Reboot"),
-                (winreg.HKEY_CURRENT_USER, r"Software\Classes\DesktopBackground\Shell\Hibernation"),
-            ]
-
-            for hive, path in additional_paths:
-                try:
-                    with winreg.OpenKey(hive, path) as key:
-                        try:
-                            value_default, _ = winreg.QueryValueEx(key, "")
-                            if value_default and "imaster.dll" in value_default.lower():
-                                dll_paths.add(value_default.split(",")[0])
-                        except:
-                            pass
-
-                        try:
-                            value_icon, _ = winreg.QueryValueEx(key, "Icon")
-                            if value_icon and "imaster.dll" in value_icon.lower():
-                                dll_paths.add(value_icon.split(",")[0])
-                        except:
-                            pass
-                except:
-                    continue
-
-            return list(dll_paths)
+            return None
 
         def verify_dll_hash(self, dll_path):
             """Проверяет хеш DLL файла"""
@@ -556,81 +347,30 @@ class InterfaceMaster:
 
         def check_imaster_dll(self):
             """Проверяет imaster.dll во всех возможных расположениях"""
-            # Сначала проверяем сохраненный путь из реестра
+            # Сначала проверяем сохраненный путь из реестра (приоритет)
             saved_path = DLLChecker.get_dll_path_from_registry()
             if saved_path and os.path.exists(saved_path):
-                return self.verify_dll_hash(saved_path)
-
-            search_locations = []
-
-            system32_path = r"C:\Windows\System32\imaster.dll"
-            search_locations.append((system32_path, "System32"))
-
-            current_exe_dir = self.base_path
-            exe_dir_path = os.path.join(current_exe_dir, "imaster.dll")
-            search_locations.append((exe_dir_path, "Папка exe (base_path)"))
-
-            work_dir = os.getcwd()
-            work_dir_path = os.path.join(work_dir, "imaster.dll")
-            search_locations.append((work_dir_path, "Рабочая папка"))
-
-            if current_exe_dir:
-                parent_dir = os.path.dirname(current_exe_dir)
-                parent_dir_path = os.path.join(parent_dir, "imaster.dll")
-                search_locations.append((parent_dir_path, "Родительская от base_path"))
-
-            parent_work_dir = os.path.dirname(work_dir)
-            parent_work_dir_path = os.path.join(parent_work_dir, "imaster.dll")
-            search_locations.append((parent_work_dir_path, "Родительская от рабочей папки"))
-
-            syswow64_path = r"C:\Windows\SysWOW64\imaster.dll"
-            search_locations.append((syswow64_path, "SysWOW64"))
-
-            windows_path = r"C:\Windows\imaster.dll"
-            search_locations.append((windows_path, "Каталог Windows"))
-
-            root_path = r"C:\imaster.dll"
-            search_locations.append((root_path, "Корень диска C"))
-
-            for file_path, description in search_locations:
-                if os.path.exists(file_path):
-                    result = self.verify_dll_hash(file_path)
-                    if result['hash_match']:
-                        # Сохраняем найденный валидный путь в реестр
-                        DLLChecker.save_dll_path_to_registry(file_path)
+                result = self.verify_dll_hash(saved_path)
+                if result['hash_match']:
                     return result
+            
+            # Ищем правильную DLL в файловой системе
+            found_path = self.search_dll_in_filesystem()
+            if found_path:
+                return self.verify_dll_hash(found_path)
 
-            registry_paths = self.search_dll_in_registry()
-
-            if registry_paths:
-                for reg_path in registry_paths:
-                    if os.path.exists(reg_path):
-                        result = self.verify_dll_hash(reg_path)
-                        if result['hash_match']:
-                            DLLChecker.save_dll_path_to_registry(reg_path)
-                        return result
-                    else:
-                        filename = os.path.basename(reg_path)
-                        if filename.lower() == "imaster.dll":
-                            for file_path, description in search_locations:
-                                if os.path.exists(file_path):
-                                    result = self.verify_dll_hash(file_path)
-                                    if result['hash_match']:
-                                        DLLChecker.save_dll_path_to_registry(file_path)
-                                    return result
-
+            # Если ничего не нашли
             return {
                 'valid_hashes': self.VALID_HASHES,
                 'actual_hash': None,
                 'dll_path': None,
                 'hash_match': False,
-                'dll_found': False,
-                'registry_paths': registry_paths if 'registry_paths' in locals() else []
+                'dll_found': False
             }
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v2.0")
+        self.root.title("Interface Master v2.1 Beta")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -655,7 +395,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "2.0.3.140"
+        self.version = "2.1.0.170 Beta"
 
         self.logo_image = None
         self.logo_photo = None

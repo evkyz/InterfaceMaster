@@ -1,310 +1,401 @@
 import hashlib
 import os
+import re
 import subprocess
-import sys
+import time
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import configparser
+import winreg
+from configparser import ConfigParser
 from datetime import datetime
+from tkinter import filedialog, messagebox, ttk
+
+# Общие константы (совпадают с другими модулями)
+RECYCLE_PATH = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon"
+DRIVE_ICONS = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons"
+CONTROL_PANEL_CLSIDS = [
+    '{26EE0668-A00A-44D7-9371-BEB064C98683}',
+    '{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}',
+    '{21EC2020-3AEA-1069-A2DD-08002B30309D}',
+]
+DESKTOP_ICON_PATHS = {
+    'user': r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon",
+    'computer': r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon",
+    'network': r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon",
+    'libraries': r"HKCR\CLSID\{031E4825-7B94-4dc3-B131-E946B44C8DD5}\DefaultIcon",
+}
+
+CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+# Пары индексов иконок корзины (empty -> full)
+RECYCLE_INDEX_PAIRS = {
+    '4': ('4', '5'), '5': ('4', '5'),
+    '24': ('24', '25'), '25': ('24', '25'),
+    '34': ('34', '35'), '35': ('34', '35'),
+    '37': ('37', '38'), '38': ('37', '38'),
+    '44': ('44', '45'), '45': ('44', '45'),
+    '64': ('64', '65'), '65': ('64', '65'),
+    '74': ('74', '75'), '75': ('74', '75'),
+    '84': ('84', '85'), '85': ('84', '85'),
+}
+
+# Соответствие ключей INI -> именам пунктов контекстного меню
+# (должно полностью покрывать _build_items в contextmenu.py)
+CONTEXT_MENU_MAP = {
+    'paint3d': 'Изменить с помощью Paint 3D',
+    'compatibility': 'Исправление проблем с совместимостью',
+    'pin_to_start': 'Закрепить на начальном экране',
+    'pin_to_taskbar': 'Закрепить на Панели задач',
+    'copy_as_path': 'Копировать как путь',
+    'modern_sharing': 'Отправить (metro)',
+    'send_to_device': 'Передать на устройство',
+    'share_access': 'Предоставить доступ к',
+    'defender': 'Проверка с использованием Windows Defender',
+    'previous_version': 'Восстановить прежнюю версию',
+    'take_ownership': 'Стать владельцем',
+    'copy_move': 'Копировать/Переместить в папку',
+    'delete_folder_content': 'Удалить содержимое папки',
+    'task_manager': 'Диспетчер задач',
+    'clipboard_clear': 'Очистить буфер',
+    'restart_explorer': 'Перезапустить explorer',
+    'regedit': 'Редактор реестра',
+    'power_menu': 'Выключение/Перезагрузка/Гибернация',
+    'admin_menu': 'Администрирование',
+    'system_menu': 'Система',
+}
+
+MOD_EXPECTED_HASHES = {
+    "imageres.dll": "DDD5D7462A26F7837CD02A7667615354F9377A0A727BF880D825676D6DDC4CB7",
+    "imagesp1.dll": "466E64D491C7B3D7051FBDC0907CD813D7A6435D18BF4B00CE0C3191B80E0541",
+    "networkexplorer.dll": "7BF68211CFBDDE2E377C992CEC2F5A0C1F41B1F12BE3A99733A549AB63A8C961",
+    "DDORes.dll": "4802C8F0BAAE3765FDFF16F09F56647B1C8B20889E4C531B773442EC068CBC3B",
+    "mmres.dll": "4651BB26196D0ED493A26F4E401C8FAC0465E7F9DE2ECFED1642155A6EAF3703",
+}
+
+
+def _reg(*args):
+    """Хелпер для вызова reg.exe без окна."""
+    return subprocess.run(['reg', *args], capture_output=True, text=True,
+                          encoding='cp866', creationflags=CREATE_NO_WINDOW)
 
 
 class AboutModule:
+    IMASTER_MARKER = 'imaster.dll'
+
     def __init__(self, parent, version, dll_info=None):
         self.parent = parent
         self.version = version
-        self.main_app = self.get_main_app(parent)
-
-        self.dll_info = dll_info
-        if self.dll_info is None:
-            try:
-                from main import DLLChecker
-                self.dll_info = DLLChecker.get_dll_info()
-            except ImportError:
-                self.dll_info = {
-                    'expected_sha1': 'F62A4326A8300D9B828744E24314B98433510195',
-                    'actual_hash': None,
-                    'dll_path': None,
-                    'hash_match': False,
-                    'dll_found': False
-                }
-
-        self.mod_expected_hashes = {
-            "imageres.dll": "DDD5D7462A26F7837CD02A7667615354F9377A0A727BF880D825676D6DDC4CB7",
-            "imagesp1.dll": "466E64D491C7B3D7051FBDC0907CD813D7A6435D18BF4B00CE0C3191B80E0541",
-            "networkexplorer.dll": "7BF68211CFBDDE2E377C992CEC2F5A0C1F41B1F12BE3A99733A549AB63A8C961",
-            "DDORes.dll": "4802C8F0BAAE3765FDFF16F09F56647B1C8B20889E4C531B773442EC068CBC3B",
-            "mmres.dll": "4651BB26196D0ED493A26F4E401C8FAC0465E7F9DE2ECFED1642155A6EAF3703"
-        }
-
+        self.dll_info = dll_info or self._load_dll_info()
         self.frame = ttk.Frame(parent)
-        self.create_widgets()
+        self._create_widgets()
         self.show()
 
-    def get_main_app(self, parent):
+    # ---------- DLL info ----------
+    @staticmethod
+    def _load_dll_info():
         try:
-            root = parent
-            while root.master:
-                root = root.master
-            if hasattr(root, 'main_app'):
-                return root.main_app
+            from main import DLLChecker
+            return DLLChecker.get_dll_info()
+        except ImportError:
+            return {
+                'expected_sha1': 'F62A4326A8300D9B828744E24314B98433510195',
+                'actual_hash': None,
+                'dll_path': None,
+                'hash_match': False,
+                'dll_found': False,
+            }
+
+    def _dll_status(self):
+        if not self.dll_info['dll_found']:
+            return "Не найден", '#e74c3c'
+        if self.dll_info['hash_match']:
+            return "Совпадает", '#27ae60'
+        return "Не совпадает", '#e67e22'
+
+    # ---------- imaster.dll path portability ----------
+    def _serialize_icon(self, value):
+        if not value:
+            return value
+        s = str(value)
+        low = s.lower()
+        marker_pos = low.find(self.IMASTER_MARKER)
+        if marker_pos == -1:
+            return s
+        return s[marker_pos:]
+
+    def _deserialize_icon(self, value, current_dll_path):
+        if not value:
+            return value
+        s = str(value)
+        low = s.lower()
+        if low.startswith(self.IMASTER_MARKER):
+            if not current_dll_path:
+                return s
+            suffix = s[len(self.IMASTER_MARKER):]
+            return f"{current_dll_path}{suffix}"
+        marker_pos = low.find(self.IMASTER_MARKER)
+        if marker_pos != -1 and current_dll_path:
+            suffix = s[marker_pos + len(self.IMASTER_MARKER):]
+            return f"{current_dll_path}{suffix}"
+        return s
+
+    def _is_imaster_icon(self, value):
+        if not value:
+            return False
+        return self.IMASTER_MARKER in str(value).lower()
+
+    @staticmethod
+    def _get_current_imaster_path():
+        try:
+            from main import DLLChecker
+            try:
+                status = DLLChecker.get_dll_status()
+                path = status.get('recommended_path')
+                if path and os.path.isfile(path):
+                    return path
+            except Exception:
+                pass
+            try:
+                path = DLLChecker.get_dll_path_without_prompt()
+                if path and os.path.isfile(path):
+                    return path
+            except Exception:
+                pass
         except Exception:
             pass
+        sys_path = r"C:\Windows\System32\imaster.dll"
+        if os.path.isfile(sys_path):
+            return sys_path
         return None
 
-    def get_dll_status_text(self):
-        if not self.dll_info['dll_found']:
-            return "Не найден"
-        if self.dll_info['hash_match']:
-            return "Совпадает"
-        return "Не совпадает"
+    # ---------- admin check ----------
+    @staticmethod
+    def _is_admin():
+        try:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
 
-    def get_dll_status_color(self):
-        if not self.dll_info['dll_found']:
-            return '#e74c3c'
-        if self.dll_info['hash_match']:
-            return '#27ae60'
-        return '#e67e22'
+    # ---------- UI ----------
+    def _create_widgets(self):
+        container = ttk.Frame(self.frame)
+        container.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-    def create_widgets(self):
-        main_container = ttk.Frame(self.frame)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-
-        ttk.Label(main_container, text="О программе",
+        ttk.Label(container, text="О программе",
                   font=('Arial', 18, 'bold'), foreground='#2c3e50').pack(pady=1)
-        ttk.Label(main_container, text=f"Interface Master версия {self.version}",
+        ttk.Label(container, text=f"Interface Master версия {self.version}",
                   font=('Arial', 10), foreground='#3498db').pack(pady=(0, 15))
 
-        info_frame = ttk.Frame(main_container)
-        info_frame.pack(fill=tk.BOTH, expand=True)
+        info = ttk.Frame(container)
+        info.pack(fill=tk.BOTH, expand=True)
 
-        desc_frame = ttk.LabelFrame(info_frame, text="Описание", padding=10)
-        desc_frame.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(desc_frame,
-                  text="Программа для настройки интерфейса Windows\nПомощник в кастомизации внешнего вида системы",
-                  font=('Arial', 9), justify=tk.CENTER).pack()
+        self._section(info, "Описание",
+                      "Программа для настройки интерфейса Windows\n"
+                      "Помощник в кастомизации внешнего вида системы",
+                      center=True)
 
-        features_frame = ttk.LabelFrame(info_frame, text="Что можно настроить", padding=10)
-        features_frame.pack(fill=tk.X, pady=(0, 15))
-        ttk.Label(features_frame,
-                  text="• Иконки рабочего стола          • Иконки дисков\n"
-                       "• Стрелки ярлыков                    • Контекстное меню\n"
-                       "• Панель задач                           • Проводник\n"
-                       "                            • Модификации",
-                  font=('Arial', 9), justify=tk.LEFT).pack()
+        self._section(info, "Что можно настроить",
+                      "• Иконки рабочего стола          • Иконки дисков\n"
+                      "• Стрелки ярлыков                    • Контекстное меню\n"
+                      "• Панель задач                           • Проводник\n"
+                      "                            • Модификации",
+                      center=False)
 
-        dll_frame = ttk.LabelFrame(info_frame, text="Файл imaster.dll", padding=10)
-        dll_frame.pack(fill=tk.X, pady=(0, 15))
-        self.create_dll_section(dll_frame)
+        self._dll_section(info)
 
-        dev_frame = ttk.LabelFrame(info_frame, text="Разработка", padding=10)
-        dev_frame.pack(fill=tk.X)
-        ttk.Label(dev_frame,
-                  text="Идея: EvKyz\nРеализация: DeepSeek AI\nСборка: 6 ноября 2026\nЛицензия: MIT License",
-                  font=('Arial', 8), justify=tk.CENTER, foreground='#7f8c8d').pack()
+        self._section(info, "Разработка",
+                      "Идея: EvKyz\nРеализация: DeepSeek AI\n"
+                      "Сборка: 9 ноября 2026\nЛицензия: MIT License",
+                      font=('Arial', 8), fg='#7f8c8d', center=True)
 
-        buttons_container = ttk.Frame(main_container)
-        buttons_container.pack(fill=tk.X, pady=(10, 5))
+        self._buttons(container)
 
-        left_buttons_frame = ttk.Frame(buttons_container)
-        left_buttons_frame.pack(side=tk.LEFT)
+    def _section(self, parent, title, text, font=('Arial', 9), fg=None, center=True):
+        frame = ttk.LabelFrame(parent, text=title, padding=10)
+        frame.pack(fill=tk.X, pady=(0, 10))
+        lbl = ttk.Label(frame, text=text, font=font,
+                        justify=tk.CENTER if center else tk.LEFT)
+        if fg:
+            lbl.config(foreground=fg)
+        lbl.pack()
 
-        save_btn = ttk.Button(left_buttons_frame, text="Сохранить настройки",
+    def _dll_section(self, parent):
+        frame = ttk.LabelFrame(parent, text="Файл imaster.dll", padding=10)
+        frame.pack(fill=tk.X, pady=(0, 15))
+
+        status_text, color = self._dll_status()
+        tk.Label(frame, text=f"Статус: {status_text}",
+                 font=('Consolas', 9, 'bold'), fg=color, anchor='w').pack(
+            fill=tk.X, pady=(0, 5))
+
+        if self.dll_info['dll_found'] and self.dll_info['dll_path']:
+            tk.Label(frame, text=f"Путь: {self.dll_info['dll_path']}",
+                     font=('Consolas', 8), anchor='w').pack(fill=tk.X, pady=(0, 3))
+            if self.dll_info['actual_hash']:
+                tk.Label(frame, text=f"Хеш SHA1: {self.dll_info['actual_hash']}",
+                         font=('Consolas', 8), anchor='w').pack(fill=tk.X)
+        else:
+            tk.Label(frame, text="Файл imaster.dll не найден",
+                     font=('Consolas', 8), anchor='w').pack(fill=tk.X)
+
+    def _buttons(self, parent):
+        bar = ttk.Frame(parent)
+        bar.pack(fill=tk.X, pady=(10, 5))
+
+        left = ttk.Frame(bar)
+        left.pack(side=tk.LEFT)
+
+        save_btn = ttk.Button(left, text="Сохранить настройки",
                               command=self.save_settings_to_ini, width=20)
         save_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.create_tooltip(save_btn, "Сохранить все текущие настройки в INI файл")
+        self._tooltip(save_btn, "Сохранить все текущие настройки в INI файл")
 
-        load_btn = ttk.Button(left_buttons_frame, text="Загрузить настройки",
+        load_btn = ttk.Button(left, text="Загрузить настройки",
                               command=self.load_settings_from_ini, width=20)
         load_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.create_tooltip(load_btn, "Загрузить настройки из INI файла и применить их")
+        self._tooltip(load_btn, "Загрузить настройки из INI файла и применить их")
 
-        reset_btn = ttk.Button(buttons_container, text="Сбросить все настройки",
+        reset_btn = ttk.Button(bar, text="Сбросить все настройки",
                                command=self.reset_all_settings, width=25)
         reset_btn.pack(side=tk.RIGHT)
-        self.create_tooltip(reset_btn, "Сбросить все настройки программы к стандартным значениям Windows")
+        self._tooltip(reset_btn,
+                      "Сбросить все настройки программы к стандартным значениям Windows")
 
-    def create_tooltip(self, widget, text):
-        def on_enter(event):
-            tooltip = tk.Toplevel()
-            tooltip.wm_overrideredirect(True)
-            tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-            tk.Label(tooltip, text=text, background="lightyellow",
-                     relief="solid", borderwidth=1, font=("Arial", 8)).pack()
-            widget.tooltip = tooltip
+    def _tooltip(self, widget, text):
+        def enter(event):
+            tip = tk.Toplevel()
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+            tk.Label(tip, text=text, background="lightyellow", relief="solid",
+                     borderwidth=1, font=("Arial", 8)).pack()
+            widget.tooltip = tip
 
-        def on_leave(event):
-            if hasattr(widget, 'tooltip') and widget.tooltip:
+        def leave(event):
+            if getattr(widget, 'tooltip', None):
                 widget.tooltip.destroy()
                 widget.tooltip = None
 
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
 
-    def create_dll_section(self, dll_frame):
-        container = tk.Frame(dll_frame, bg='#f5f5f5', padx=5, pady=5)
-        container.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(container, text=f"Статус: {self.get_dll_status_text()}",
-                 font=('Consolas', 9, 'bold'), fg=self.get_dll_status_color(),
-                 bg='#f5f5f5', anchor='w').pack(fill=tk.X, pady=(0, 5))
-
-        if self.dll_info['dll_found'] and self.dll_info['dll_path']:
-            tk.Label(container, text=f"Путь: {self.dll_info['dll_path']}",
-                     font=('Consolas', 8), bg='#f5f5f5', anchor='w').pack(fill=tk.X, pady=(0, 3))
-            if self.dll_info['actual_hash']:
-                tk.Label(container, text=f"Хеш SHA1: {self.dll_info['actual_hash']}",
-                         font=('Consolas', 8), bg='#f5f5f5', anchor='w').pack(fill=tk.X)
-        else:
-            tk.Label(container, text="Файл imaster.dll не найден",
-                     font=('Consolas', 8), bg='#f5f5f5', anchor='w').pack(fill=tk.X)
-
-    def log_to_file(self, message, log_name="apply_settings.log"):
-        try:
-            log_file_path = os.path.join(os.path.expanduser("~"), "Desktop", log_name)
-            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            with open(log_file_path, "a", encoding="utf-8") as f:
-                f.write(f"[{timestamp}] {message}\n")
-        except Exception:
-            pass
-
-    def get_registry_value(self, key_path, value_name, hive='HKCU'):
-        try:
-            cmd = ['reg', 'query', f'{hive}\\{key_path}', '/v', value_name]
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='cp866',
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if value_name in line:
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            return parts[-1]
-        except Exception:
-            pass
+    # ---------- registry helpers ----------
+    @staticmethod
+    def _get_registry_value(key_path, value_name, hive='HKCU'):
+        r = _reg('query', f'{hive}\\{key_path}', '/v', value_name)
+        if r.returncode == 0:
+            for line in r.stdout.split('\n'):
+                if value_name in line:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        return parts[-1]
         return None
 
+    @staticmethod
+    def _key_exists(key_path, hive='HKLM'):
+        return _reg('query', f'{hive}\\{key_path}').returncode == 0
+
+    # ---------- collect settings ----------
     def collect_all_settings(self):
         return {
             'metadata': {
                 'version': self.version,
                 'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'program': 'Interface Master'
+                'program': 'Interface Master',
             },
-            'desktop': self.collect_desktop_settings(),
-            'disk': self.collect_disk_settings(),
-            'str': self.collect_shortcut_settings(),
-            'contextmenu': self.collect_contextmenu_settings(),
-            'taskbar': self.collect_taskbar_settings(),
-            'explorer': self.collect_explorer_settings()
+            'desktop': self._collect_desktop(),
+            'disk': self._collect_disk(),
+            'str': self._collect_shortcut(),
+            'contextmenu': self._collect_contextmenu(),
+            'taskbar': self._collect_taskbar(),
+            'explorer': self._collect_explorer(),
+            'createnew': self._collect_createnew(),
+            'sendto': self._collect_sendto(),
         }
 
-    def collect_desktop_settings(self):
+    def _collect_desktop(self):
         settings = {}
-
         items = {
             'user': r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon',
             'computer': r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon',
-            'network': r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon'
+            'network': r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon',
         }
         for item, path in items.items():
-            val = self.get_registry_value(path, '', 'HKCU')
-            if val:
-                settings[f'icon_{item}'] = val
+            val = self._get_registry_value(path, '', 'HKCU')
+            if val and self._is_imaster_icon(val):
+                settings[f'icon_{item}'] = self._serialize_icon(val)
 
-        recycle_path = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon'
-        empty_val = self.get_registry_value(recycle_path, '', 'HKCU')
-
-        if empty_val:
+        recycle_reg = r'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon'
+        empty_val = self._get_registry_value(recycle_reg, '', 'HKCU')
+        full_val = self._get_registry_value(recycle_reg, 'Full', 'HKCU')
+        if empty_val and self._is_imaster_icon(empty_val):
+            matched = False
             if ',-' in empty_val:
                 idx = empty_val.split(',-')[-1]
-                recycle_pairs = {
-                    '4': ('4', '5'), '5': ('4', '5'),
-                    '24': ('24', '25'), '25': ('24', '25'),
-                    '34': ('34', '35'), '35': ('34', '35'),
-                    '37': ('37', '38'), '38': ('37', '38'),
-                    '44': ('44', '45'), '45': ('44', '45'),
-                    '64': ('64', '65'), '65': ('64', '65'),
-                    '74': ('74', '75'), '75': ('74', '75'),
-                    '84': ('84', '85'), '85': ('84', '85')
-                }
-                if idx in recycle_pairs:
-                    empty_idx, full_idx = recycle_pairs[idx]
-                    dll_path = empty_val.split(',-')[0]
-                    settings['icon_recycle_bin_empty'] = f"{dll_path},-{empty_idx}"
-                    settings['icon_recycle_bin_full'] = f"{dll_path},-{full_idx}"
-                else:
-                    settings['icon_recycle_bin_empty'] = empty_val
-                    full_val = self.get_registry_value(recycle_path, 'Full', 'HKCU')
-                    settings['icon_recycle_bin_full'] = full_val or empty_val
-            else:
-                settings['icon_recycle_bin_empty'] = empty_val
-                full_val = self.get_registry_value(recycle_path, 'Full', 'HKCU')
-                settings['icon_recycle_bin_full'] = full_val or empty_val
+                if idx in RECYCLE_INDEX_PAIRS:
+                    empty_idx, full_idx = RECYCLE_INDEX_PAIRS[idx]
+                    dll = empty_val.split(',-')[0]
+                    settings['icon_recycle_bin_empty'] = self._serialize_icon(
+                        f"{dll},-{empty_idx}")
+                    if full_val and self._is_imaster_icon(full_val):
+                        settings['icon_recycle_bin_full'] = self._serialize_icon(full_val)
+                    matched = True
+            if not matched:
+                settings['icon_recycle_bin_empty'] = self._serialize_icon(empty_val)
+                if full_val and self._is_imaster_icon(full_val):
+                    settings['icon_recycle_bin_full'] = self._serialize_icon(full_val)
 
-        libraries_val = self.get_registry_value(
+        libraries = self._get_registry_value(
             r'CLSID\{031E4825-7B94-4dc3-B131-E946B44C8DD5}\DefaultIcon', '', 'HKCR')
-        if libraries_val:
-            settings['icon_libraries'] = libraries_val
+        if libraries and self._is_imaster_icon(libraries):
+            settings['icon_libraries'] = self._serialize_icon(libraries)
 
-        control_panel_clsids = [
-            '{26EE0668-A00A-44D7-9371-BEB064C98683}',
-            '{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}',
-            '{21EC2020-3AEA-1069-A2DD-08002B30309D}'
-        ]
-        for clsid in control_panel_clsids:
+        for clsid in CONTROL_PANEL_CLSIDS:
             path = rf'Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{clsid}\DefaultIcon'
-            val = self.get_registry_value(path, '', 'HKCU')
-            if val:
-                settings[f'icon_control_panel_{clsid}'] = val
-
+            val = self._get_registry_value(path, '', 'HKCU')
+            if val and self._is_imaster_icon(val):
+                settings[f'icon_control_panel_{clsid}'] = self._serialize_icon(val)
         return settings
 
-    def collect_disk_settings(self):
+    def _collect_disk(self):
         settings = {}
-        try:
-            result = subprocess.run(
-                ['reg', 'query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons'],
-                capture_output=True, text=True, encoding='cp866',
-                creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if 'HKEY_LOCAL_MACHINE' in line:
-                        drive = line.split('\\')[-1].strip()
-                        if drive and len(drive) == 1 and drive.isalpha():
-                            icon_path = f'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\{drive}\\DefaultIcon'
-                            result2 = subprocess.run(['reg', 'query', icon_path, '/ve'],
-                                                     capture_output=True, text=True, encoding='cp866',
-                                                     creationflags=subprocess.CREATE_NO_WINDOW)
-                            if result2.returncode == 0:
-                                for line2 in result2.stdout.split('\n'):
-                                    if 'REG_' in line2:
-                                        parts = line2.split()
-                                        if len(parts) >= 3:
-                                            settings[f'icon_{drive}'] = parts[-1]
-        except Exception:
-            pass
+        r = _reg('query', DRIVE_ICONS)
+        if r.returncode != 0:
+            return settings
+        for line in r.stdout.split('\n'):
+            if 'HKEY_LOCAL_MACHINE' in line:
+                drive = line.split('\\')[-1].strip()
+                if len(drive) == 1 and drive.isalpha():
+                    r2 = _reg('query', f'{DRIVE_ICONS}\\{drive}\\DefaultIcon', '/ve')
+                    if r2.returncode == 0:
+                        for line2 in r2.stdout.split('\n'):
+                            if 'REG_' in line2:
+                                parts = line2.split()
+                                if len(parts) >= 3:
+                                    val = parts[-1]
+                                    if self._is_imaster_icon(val):
+                                        settings[f'icon_{drive}'] = self._serialize_icon(val)
         return settings
 
-    def collect_shortcut_settings(self):
+    def _collect_shortcut(self):
         settings = {}
-        arrow_val = self.get_registry_value(
+        arrow = self._get_registry_value(
             r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons', '29', 'HKLM')
-        if arrow_val is None:
+        if arrow is None:
             settings['arrow_style'] = 'default'
-        elif arrow_val == '':
+        elif arrow == '':
             settings['arrow_style'] = 'none'
-        elif 'shell32.dll,-30' in str(arrow_val):
+        elif 'shell32.dll,-30' in str(arrow):
             settings['arrow_style'] = 'small'
         else:
             settings['arrow_style'] = 'custom'
 
-        template_val = self.get_registry_value(
+        tmpl = self._get_registry_value(
             r'Software\Microsoft\Windows\CurrentVersion\Explorer\NamingTemplates',
             'ShortcutNameTemplate', 'HKCU')
-        if template_val:
-            if '"%s — ярлык.lnk"' in str(template_val):
+        if tmpl:
+            if '"%s — ярлык.lnk"' in str(tmpl):
                 settings['shortcut_text'] = 'default'
-            elif '"%s.lnk"' in str(template_val):
+            elif '"%s.lnk"' in str(tmpl):
                 settings['shortcut_text'] = 'removed'
             else:
                 settings['shortcut_text'] = 'custom'
@@ -312,464 +403,926 @@ class AboutModule:
             settings['shortcut_text'] = 'default'
         return settings
 
-    def collect_contextmenu_settings(self):
+    def _collect_contextmenu(self):
+        """Собирает все пункты контекстного меню через DesktopMenuTab,
+        чтобы гарантировать соответствие ключам и именам из _build_items."""
         settings = {}
-        items = {
-            'copy_as_path': r'HKLM\SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\CopyAsPathMenu',
-            'pin_to_start': r'HKLM\SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen',
-            'pin_to_taskbar': r'HKLM\SOFTWARE\Classes\*\shellex\ContextMenuHandlers\{90AA3A4E-1CBA-4233-B8BB-535773D48449}',
-            'take_ownership': r'HKCR\*\shell\runas',
-            'copy_move': r'HKLM\SOFTWARE\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\Copy To',
-            'admin_menu': r'HKCU\Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\Admin',
-            'system_menu': r'HKCU\Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\System',
-            'task_manager': r'HKCR\DesktopBackground\Shell\TaskManager',
-            'restart_explorer': r'HKCR\DesktopBackground\Shell\RestartExplorer',
-            'clipboard_clear': r'HKCR\DesktopBackground\Shell\Clip',
-            'regedit': r'HKCR\DesktopBackground\Shell\Regedit',
-            'power_menu': r'HKCR\DesktopBackground\Shell\Shutdown'
-        }
-        for name, path in items.items():
-            hive = path.split('\\')[0]
-            key_path = '\\'.join(path.split('\\')[1:])
-            try:
-                result = subprocess.run(['reg', 'query', f'{hive}\\{key_path}'],
-                                        capture_output=True,
-                                        creationflags=subprocess.CREATE_NO_WINDOW)
-                settings[name] = result.returncode == 0
-            except Exception:
-                settings[name] = False
-        return settings
-
-    def collect_taskbar_settings(self):
-        settings = {}
-        short_date = self.get_registry_value(r'Control Panel\International', 'sShortDate', 'HKCU')
-        settings['show_weekday'] = 'ddd' in str(short_date) if short_date else False
-
-        notif = self.get_registry_value(r'SOFTWARE\Policies\Microsoft\Windows\Explorer',
-                                        'DisableNotificationCenter', 'HKLM')
-        settings['notification_center'] = notif != '0x1'
-
-        small = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-            'TaskbarSmallIcons', 'HKCU')
-        settings['small_icons'] = small == '0x1'
-
-        search = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Search', 'SearchboxTaskbarMode', 'HKCU')
-        if search == '0x0':
-            settings['search_mode'] = 0
-        elif search == '0x1':
-            settings['search_mode'] = 1
-        else:
-            settings['search_mode'] = 2
-
-        hide_people = self.get_registry_value(
-            r'Software\Policies\Microsoft\Windows\Explorer', 'HidePeopleBar', 'HKCU')
-        settings['show_people'] = hide_people != '0x1'
-
-        task_view = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-            'ShowTaskViewButton', 'HKCU')
-        settings['show_task_view'] = task_view != '0x0'
-
-        glom = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-            'TaskbarGlomLevel', 'HKCU')
-        if glom == '0x0':
-            settings['grouping_mode'] = 0
-        elif glom == '0x1':
-            settings['grouping_mode'] = 1
-        elif glom == '0x2':
-            settings['grouping_mode'] = 2
-        else:
-            settings['grouping_mode'] = 0
-
-        meet = self.get_registry_value(
-            r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer',
-            'HideSCAMeetNow', 'HKLM')
-        settings['show_meet_now'] = meet != '0x1'
-
-        return settings
-
-    def collect_explorer_settings(self):
-        settings = {}
-        bitlocker = self.check_registry_key_exists(r'Drive\shell\encrypt-bde\ProgrammaticAccessOnly', 'HKCR')
-        settings['bitlocker_enabled'] = not bitlocker
-
-        photo = self.get_registry_value(
-            r'SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations', '.jpg', 'HKLM')
-        settings['photo_viewer_enabled'] = photo is not None
-
-        hide_ext = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-            'HideFileExt', 'HKCU')
-        settings['show_file_extensions'] = hide_ext == '0x0'
-
-        no_recent = self.get_registry_value(
-            r'Software\Microsoft\Windows\CurrentVersion\Policies\Explorer',
-            'NoRecentDocsHistory', 'HKCU')
-        settings['recent_folders_enabled'] = no_recent != '0x1'
-
-        return settings
-
-    def check_registry_key_exists(self, key_path, hive='HKLM'):
         try:
-            result = subprocess.run(['reg', 'query', f'{hive}\\{key_path}'],
-                                    capture_output=True,
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
-            return result.returncode == 0
-        except Exception:
-            return False
-
-    def save_settings_to_ini(self):
-        try:
-            file_path = filedialog.asksaveasfilename(
-                title="Сохранить настройки",
-                defaultextension=".ini",
-                filetypes=[("INI files", "*.ini")],
-                initialfile=f"interface_master_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ini")
-            if not file_path:
-                return
-
-            config = configparser.ConfigParser()
-            config.optionxform = str
-
-            for section, values in self.collect_all_settings().items():
-                config[section] = {}
-                for key, value in values.items():
-                    value_str = str(value)
-                    if '%' in value_str:
-                        value_str = value_str.replace('%', '%%')
-                    config[section][key] = value_str
-
-            with open(file_path, 'w', encoding='utf-8') as f:
-                config.write(f)
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{str(e)}")
-
-    def load_settings_from_ini(self):
-        try:
-            file_path = filedialog.askopenfilename(title="Загрузить настройки",
-                                                   filetypes=[("INI files", "*.ini")])
-            if not file_path:
-                return
-
-            config = configparser.ConfigParser()
-            config.optionxform = str
-            config.read(file_path, encoding='utf-8')
-
-            self.log_to_file("=" * 60, "apply_settings.log")
-            self.log_to_file("ЗАГРУЗКА НАСТРОЕК ИЗ INI", "apply_settings.log")
-            if 'str' in config:
-                self.log_to_file("Секция [str]:", "apply_settings.log")
-                for key, value in config['str'].items():
-                    self.log_to_file(f"  {key} = {value}", "apply_settings.log")
-            self.log_to_file("-" * 60, "apply_settings.log")
-
-            self.apply_settings_from_config(config)
-            self.restart_explorer_silent()
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось загрузить настройки:\n{str(e)}")
-
-    def apply_settings_from_config(self, config):
-        if 'str' in config:
-            self._apply_str_settings(config)
-        if 'taskbar' in config:
-            self._apply_taskbar_settings(config)
-        if 'explorer' in config:
-            self._apply_explorer_settings(config)
-        if 'desktop' in config:
-            self._apply_desktop_icons(config)
-        if 'disk' in config:
-            self._apply_disk_icons(config)
-        if 'contextmenu' in config:
-            self._apply_contextmenu_settings(config)
-
-        self.log_to_file("=" * 60, "apply_settings.log")
-        self.log_to_file("ПРИМЕНЕНИЕ НАСТРОЕК ЗАВЕРШЕНО", "apply_settings.log")
-        self.log_to_file("=" * 60, "apply_settings.log")
-
-    def _apply_str_settings(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК ЯРЛЫКОВ ===", "apply_settings.log")
-        try:
-            from str import Module as StrModule
+            from contextmenu import DesktopMenuTab
             temp = ttk.Frame(self.parent)
-            s = StrModule(temp)
-
-            arrow_changed = False
-            text_changed = False
-
-            if 'arrow_style' in config['str']:
-                style = config['str']['arrow_style']
-                self.log_to_file(f"  arrow_style = {style}", "apply_settings.log")
-                if style == 'default':
-                    s.arrow_choice.set(1)
-                    arrow_changed = True
-                elif style == 'small':
-                    s.arrow_choice.set(2)
-                    arrow_changed = True
-                elif style == 'none':
-                    s.arrow_choice.set(3)
-                    arrow_changed = True
-                else:
-                    self.log_to_file(f"    Неизвестный стиль '{style}'", "apply_settings.log")
-
-            if 'shortcut_text' in config['str']:
-                txt = config['str']['shortcut_text']
-                self.log_to_file(f"  shortcut_text = {txt}", "apply_settings.log")
-                if txt == 'default':
-                    s.shortcut_text_choice.set(1)
-                    text_changed = True
-                else:
-                    s.shortcut_text_choice.set(2)
-                    text_changed = True
-
-            if arrow_changed or text_changed:
-                s.apply_changes()
-                self.log_to_file(
-                    f"    Изменения применены (стрелки: {arrow_changed}, текст: {text_changed})",
-                    "apply_settings.log")
-
-            s.hide()
+            dt = DesktopMenuTab(temp)
+            for entry in dt.menu_item_buttons:
+                item = entry['data']
+                ini_key = None
+                for k, v in CONTEXT_MENU_MAP.items():
+                    if v == item['name']:
+                        ini_key = k
+                        break
+                if ini_key is None:
+                    continue
+                try:
+                    settings[ini_key] = bool(item['check_command']())
+                except Exception:
+                    settings[ini_key] = False
             temp.destroy()
         except Exception as e:
-            self.log_to_file(f"  ОШИБКА str: {e}", "apply_settings.log")
+            self._log(f"  ОШИБКА сбора contextmenu: {e}")
+        return settings
 
-    def _apply_taskbar_settings(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК ПАНЕЛИ ЗАДАЧ ===", "apply_settings.log")
+    def _collect_taskbar(self):
+        s = {}
+        short_date = self._get_registry_value(r'Control Panel\International',
+                                              'sShortDate', 'HKCU')
+        s['show_weekday'] = 'ddd' in str(short_date) if short_date else False
+
+        notif = self._get_registry_value(
+            r'SOFTWARE\Policies\Microsoft\Windows\Explorer',
+            'DisableNotificationCenter', 'HKLM')
+        s['notification_center'] = notif != '0x1'
+
+        small = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+            'TaskbarSmallIcons', 'HKCU')
+        s['small_icons'] = small == '0x1'
+
+        search = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Search',
+            'SearchboxTaskbarMode', 'HKCU')
+        s['search_mode'] = {'0x0': 0, '0x1': 1}.get(search, 2)
+
+        tv = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+            'ShowTaskViewButton', 'HKCU')
+        s['show_task_view'] = tv != '0x0'
+
+        glom = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+            'TaskbarGlomLevel', 'HKCU')
+        s['grouping_mode'] = {'0x0': 0, '0x1': 1, '0x2': 2}.get(glom, 0)
+
+        # Люди и Провести собрание — сохраняем ТОЛЬКО если версия поддерживает,
+        # по аналогии с provider_* в createnew (сохраняются только установленные).
         try:
             from taskbar import Module as TaskbarModule
             temp = ttk.Frame(self.parent)
             t = TaskbarModule(temp)
+            temp.pack_forget()
 
-            if 'show_weekday' in config['taskbar']:
-                current = t.check_weekday_state()
-                target = config['taskbar']['show_weekday'].lower() == 'true'
-                if current != target:
-                    t.toggle_weekday()
-                    self.log_to_file(f"  День недели: {current} -> {target}", "apply_settings.log")
-            if 'notification_center' in config['taskbar']:
-                current = not t.check_notification_center_state()
-                target = config['taskbar']['notification_center'].lower() == 'true'
-                if current != target:
-                    t.toggle_notification_center()
-            if 'small_icons' in config['taskbar']:
-                current = t.check_taskbar_size_state()
-                target = config['taskbar']['small_icons'].lower() == 'true'
-                if current != target:
-                    t.toggle_taskbar_size()
-            if 'search_mode' in config['taskbar']:
-                target = int(config['taskbar']['search_mode'])
-                current = t.check_search_state()
-                if current != target:
-                    for _ in range(10):
-                        if t.check_search_state() == target:
-                            break
-                        t.toggle_search()
-            if 'show_people' in config['taskbar']:
-                current = not t.check_people_state()
-                target = config['taskbar']['show_people'].lower() == 'true'
-                if current != target:
-                    t.toggle_people()
-            if 'show_task_view' in config['taskbar']:
-                current = not t.check_task_view_state()
-                target = config['taskbar']['show_task_view'].lower() == 'true'
-                if current != target:
-                    t.toggle_task_view()
-            if 'grouping_mode' in config['taskbar']:
-                target = int(config['taskbar']['grouping_mode'])
-                current = t.check_grouping_state()
-                if current != target:
-                    for _ in range(10):
-                        if t.check_grouping_state() == target:
-                            break
-                        t.toggle_grouping()
-            if 'show_meet_now' in config['taskbar'] and t.is_windows_version_supported():
-                current = not t.check_meet_now_state()
-                target = config['taskbar']['show_meet_now'].lower() == 'true'
-                if current != target:
-                    t.toggle_meet_now()
+            if t.is_people_bar_supported():
+                people = self._get_registry_value(
+                    r'Software\Policies\Microsoft\Windows\Explorer',
+                    'HidePeopleBar', 'HKCU')
+                s['show_people'] = people != '0x1'
+
+            if t.is_windows_version_supported():
+                meet = self._get_registry_value(
+                    r'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer',
+                    'HideSCAMeetNow', 'HKLM')
+                s['show_meet_now'] = meet != '0x1'
 
             t.hide()
             temp.destroy()
         except Exception as e:
-            self.log_to_file(f"  ОШИБКА taskbar: {e}", "apply_settings.log")
+            self._log(f"  ОШИБКА сбора taskbar (people/meet): {e}")
 
-    def _apply_explorer_settings(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК ПРОВОДНИКА ===", "apply_settings.log")
+        return s
+
+    def _collect_explorer(self):
+        s = {}
+        # BitLocker: ProgrammaticAccessOnly — это ЗНАЧЕНИЕ (пустая строка REG_SZ).
+        # _get_registry_value не подходит: для пустого REG_SZ в stdout только 2 поля,
+        # и парсер возвращает None даже когда значение есть.
+        # Проверяем наличие значения через returncode reg query.
+        r = _reg('query', r'HKCR\Drive\shell\encrypt-bde',
+                 '/v', 'ProgrammaticAccessOnly')
+        s['bitlocker_enabled'] = (r.returncode != 0)
+
+        # photo_viewer_enabled: согласовано с _check_photo_viewer_state в explorer.py
+        # (требуется и ассоциация .jpg, и класс PhotoViewer.FileAssoc.Jpeg)
+        photo_assoc = self._get_registry_value(
+            r'SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',
+            '.jpg', 'HKLM')
+        photo_class = self._key_exists(
+            r'SOFTWARE\Classes\PhotoViewer.FileAssoc.Jpeg', 'HKLM')
+        s['photo_viewer_enabled'] = (photo_assoc is not None) and photo_class
+
+        hide_ext = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+            'HideFileExt', 'HKCU')
+        s['show_file_extensions'] = hide_ext == '0x0'
+
+        no_recent = self._get_registry_value(
+            r'Software\Microsoft\Windows\CurrentVersion\Policies\Explorer',
+            'NoRecentDocsHistory', 'HKCU')
+        s['recent_folders_enabled'] = no_recent != '0x1'
+
+        # Дополнительные сведения об этом изображении
         try:
-            from explorer import ExplorerModule
+            from explorer import IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE
+            rr = _reg('query', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE)
+            hidden = False
+            if rr.returncode == 0 and IMAGE_DETAILS_VALUE in rr.stdout:
+                m = re.search(r'REG_DWORD\s+(0x[0-9a-fA-F]+)', rr.stdout)
+                if m and m.group(1).lower() == '0x1':
+                    hidden = True
+            s['image_details_hidden'] = hidden
+        except Exception as e:
+            self._log(f"  ОШИБКА сбора image_details: {e}")
+
+        # Папки в "Этот компьютер"
+        try:
+            from explorer import FOLDERS, NAMESPACE_KEY
+            for guid in FOLDERS:
+                r = _reg('query', f'{NAMESPACE_KEY}\\{guid}')
+                s[f'folder_{guid}'] = (r.returncode == 0)
+        except Exception as e:
+            self._log(f"  ОШИБКА сбора папок explorer: {e}")
+
+        return s
+
+    def _collect_createnew(self):
+        settings = {}
+
+        if self._key_exists(r'Folder\ShellNew', 'HKCR'):
+            settings['folder'] = True
+        elif self._key_exists(r'Folder\ShellNew_no', 'HKCR'):
+            settings['folder'] = False
+        else:
+            settings['folder'] = False
+
+        extensions = {
+            'bmp': r'SOFTWARE\Classes\.bmp\ShellNew',
+            'contact': r'SOFTWARE\Classes\.contact\ShellNew',
+            'lnk': r'SOFTWARE\Classes\.lnk\ShellNew',
+            'rtf': r'SOFTWARE\Classes\.rtf\ShellNew',
+            'txt': r'SOFTWARE\Classes\.txt\ShellNew',
+            'zip': r'SOFTWARE\Classes\.zip\CompressedFolder\ShellNew',
+        }
+        for ext, path in extensions.items():
+            if self._key_exists(path, 'HKLM'):
+                settings[ext] = True
+            elif self._key_exists(path + '_no', 'HKLM'):
+                settings[ext] = False
+            else:
+                settings[ext] = False
+
+        try:
+            from createnew import (
+                MS_EXTENSIONS, _ext_registered,
+                _find_shellnew_under_ext, _classify_provider,
+            )
+            import winreg as _wr
+            any_installed = False
+            for ext in MS_EXTENSIONS:
+                if not _ext_registered(ext):
+                    continue
+                for hive in (_wr.HKEY_LOCAL_MACHINE, _wr.HKEY_CURRENT_USER):
+                    for h, path, cls, enabled in _find_shellnew_under_ext(hive, ext):
+                        pid, _display, _vendor = _classify_provider(cls, ext)
+                        any_installed = True
+                        settings[f'provider_{pid}'] = enabled
+            settings['office_installed'] = any_installed
+        except Exception:
+            settings['office_installed'] = False
+        return settings
+
+    def _collect_sendto(self):
+        sendto_path = os.path.join(os.environ.get('APPDATA', ''),
+                                   'Microsoft', 'Windows', 'SendTo')
+        settings = {}
+        if not os.path.isdir(sendto_path):
+            return settings
+        try:
+            import ctypes
+            for name in sorted(os.listdir(sendto_path)):
+                if name.lower() == 'desktop.ini':
+                    continue
+                full = os.path.join(sendto_path, name)
+                if not (os.path.isfile(full) or os.path.islink(full)):
+                    continue
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(full)
+                if attrs == -1:
+                    continue
+                hidden = bool(attrs & 0x2)
+                settings[name] = not hidden
+        except Exception:
+            pass
+        return settings
+
+    # ---------- save / load INI ----------
+    def save_settings_to_ini(self):
+        try:
+            path = filedialog.asksaveasfilename(
+                title="Сохранить настройки",
+                defaultextension=".ini",
+                filetypes=[("INI files", "*.ini")],
+                initialfile=f"interface_master_{datetime.now().strftime('%Y%m%d_%H%M%S')}.ini")
+            if not path:
+                return
+            config = ConfigParser()
+            config.optionxform = str
+            for section, values in self.collect_all_settings().items():
+                config[section] = {}
+                for key, value in values.items():
+                    config[section][key] = str(value).replace('%', '%%')
+            with open(path, 'w', encoding='utf-8') as f:
+                config.write(f)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки:\n{e}")
+
+    def load_settings_from_ini(self):
+        try:
+            path = filedialog.askopenfilename(title="Загрузить настройки",
+                                              filetypes=[("INI files", "*.ini")])
+            if not path:
+                return
+            config = ConfigParser()
+            config.optionxform = str
+            config.read(path, encoding='utf-8')
+
+            self._log("=" * 60)
+            self._log("ЗАГРУЗКА НАСТРОЕК ИЗ INI")
+            for sec in ('str', 'createnew', 'sendto', 'taskbar',
+                        'contextmenu', 'explorer'):
+                if sec in config:
+                    self._log(f"Секция [{sec}]:")
+                    for k, v in config[sec].items():
+                        self._log(f"  {k} = {v}")
+            self._log("-" * 60)
+
+            self._apply_settings(config)
+            self._restart_explorer_silent()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить настройки:\n{e}")
+
+    def _apply_settings(self, config):
+        if 'str' in config:
+            self._apply_str(config)
+        if 'taskbar' in config:
+            self._apply_taskbar(config)
+        if 'explorer' in config:
+            self._apply_explorer(config)
+        if 'desktop' in config:
+            self._apply_desktop(config)
+        if 'disk' in config:
+            self._apply_disk(config)
+        if 'contextmenu' in config:
+            self._apply_contextmenu(config)
+        if 'createnew' in config:
+            self._apply_createnew(config)
+        if 'sendto' in config:
+            self._apply_sendto(config)
+        self._log("=" * 60)
+        self._log("ПРИМЕНЕНИЕ НАСТРОЕК ЗАВЕРШЕНО")
+        self._log("=" * 60)
+
+    # ---------- apply per-section ----------
+    def _apply_str(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК ЯРЛЫКОВ ===")
+        try:
+            from str import Module as StrModule
+            temp = ttk.Frame(self.parent)
+            s = StrModule(temp)
+            temp.pack_forget()
+            changed = False
+
+            if 'arrow_style' in config['str']:
+                style = config['str']['arrow_style']
+                self._log(f"  arrow_style = {style}")
+                mapping = {'default': 1, 'small': 2, 'none': 3}
+                if style in mapping:
+                    s.arrow_choice.set(mapping[style])
+                    changed = True
+
+            if 'shortcut_text' in config['str']:
+                txt = config['str']['shortcut_text']
+                self._log(f"  shortcut_text = {txt}")
+                if txt in ('default', 'removed'):
+                    s.shortcut_text_choice.set(1 if txt == 'default' else 2)
+                    changed = True
+
+            if changed:
+                s.apply_changes()
+                self._log("    Изменения применены")
+            s.hide()
+            temp.destroy()
+        except Exception as e:
+            self._log(f"  ОШИБКА str: {e}")
+
+    def _apply_taskbar(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК ПАНЕЛИ ЗАДАЧ ===")
+        try:
+            from taskbar import Module as TaskbarModule
+            temp = ttk.Frame(self.parent)
+            t = TaskbarModule(temp)
+            tb = config['taskbar']
+
+            def _target_bool(key):
+                return tb[key].strip().lower() == 'true' if key in tb else None
+
+            def _target_int(key):
+                try:
+                    return int(tb[key].strip()) if key in tb else None
+                except (ValueError, TypeError):
+                    return None
+
+            applied = 0
+            skipped = 0
+            failed = 0
+
+            tgt = _target_bool('show_weekday')
+            if tgt is not None:
+                cur = t.check_weekday_state()
+                if cur != tgt:
+                    t._do_toggle_weekday()
+                    if t.check_weekday_state() == tgt:
+                        self._log(f"  show_weekday: {cur} -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log(f"  show_weekday: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  show_weekday: без изменений ({tgt})")
+
+            tgt = _target_bool('small_icons')
+            if tgt is not None:
+                cur = t.check_taskbar_size_state()
+                if cur != tgt:
+                    t._do_toggle_taskbar_size()
+                    if t.check_taskbar_size_state() == tgt:
+                        self._log(f"  small_icons: {cur} -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log(f"  small_icons: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  small_icons: без изменений ({tgt})")
+
+            tgt = _target_int('search_mode')
+            if tgt is not None and tgt in (0, 1, 2):
+                for _ in range(5):
+                    if t.check_search_state() == tgt:
+                        break
+                    t._do_toggle_search()
+                final = t.check_search_state()
+                if final == tgt:
+                    self._log(f"  search_mode: -> {final} (OK)")
+                    applied += 1
+                else:
+                    self._log(f"  search_mode: не удалось ({final} != {tgt})")
+                    failed += 1
+
+            tgt = _target_bool('show_task_view')
+            if tgt is not None:
+                cur = not t.check_task_view_state()
+                if cur != tgt:
+                    t._do_toggle_task_view()
+                    if (not t.check_task_view_state()) == tgt:
+                        self._log(f"  show_task_view: {cur} -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log(f"  show_task_view: не удалось")
+                        failed += 1
+                else:
+                    self._log(f"  show_task_view: без изменений ({tgt})")
+
+            tgt = _target_int('grouping_mode')
+            if tgt is not None and tgt in (0, 1, 2):
+                for _ in range(5):
+                    if t.check_grouping_state() == tgt:
+                        break
+                    t._do_toggle_grouping()
+                final = t.check_grouping_state()
+                if final == tgt:
+                    self._log(f"  grouping_mode: -> {final} (OK)")
+                    applied += 1
+                else:
+                    self._log(f"  grouping_mode: не удалось ({final} != {tgt})")
+                    failed += 1
+
+            is_admin = self._is_admin()
+
+            tgt = _target_bool('notification_center')
+            if tgt is not None:
+                if not is_admin:
+                    self._log(f"  notification_center: пропущено (нужны права администратора)")
+                    skipped += 1
+                else:
+                    cur = not t.check_notification_center_state()
+                    if cur != tgt:
+                        t._do_toggle_notification_center()
+                        if (not t.check_notification_center_state()) == tgt:
+                            self._log(f"  notification_center: {cur} -> {tgt} (OK)")
+                            applied += 1
+                        else:
+                            self._log(f"  notification_center: не удалось применить")
+                            failed += 1
+                    else:
+                        self._log(f"  notification_center: без изменений ({tgt})")
+
+            tgt = _target_bool('show_people')
+            if tgt is not None:
+                if not t.is_people_bar_supported():
+                    self._log(f"  show_people: пропущено (не поддерживается на этой версии)")
+                    skipped += 1
+                else:
+                    cur = not t.check_people_state()
+                    if cur != tgt:
+                        t._do_toggle_people()
+                        if (not t.check_people_state()) == tgt:
+                            self._log(f"  show_people: {cur} -> {tgt} (OK)")
+                            applied += 1
+                        else:
+                            self._log(f"  show_people: не удалось применить")
+                            failed += 1
+                    else:
+                        self._log(f"  show_people: без изменений ({tgt})")
+
+            tgt = _target_bool('show_meet_now')
+            if tgt is not None:
+                if not t.is_windows_version_supported():
+                    self._log(f"  show_meet_now: пропущено (не поддерживается на этой версии)")
+                    skipped += 1
+                elif not is_admin:
+                    self._log(f"  show_meet_now: пропущено (нужны права администратора)")
+                    skipped += 1
+                else:
+                    cur = not t.check_meet_now_state()
+                    if cur != tgt:
+                        t._do_toggle_meet_now()
+                        if (not t.check_meet_now_state()) == tgt:
+                            self._log(f"  show_meet_now: {cur} -> {tgt} (OK)")
+                            applied += 1
+                        else:
+                            self._log(f"  show_meet_now: не удалось применить")
+                            failed += 1
+                    else:
+                        self._log(f"  show_meet_now: без изменений ({tgt})")
+
+            t.hide()
+            temp.destroy()
+            self._log(f"  Итог taskbar: применено {applied}, пропущено {skipped}, ошибок {failed}")
+        except Exception as e:
+            self._log(f"  ОШИБКА taskbar: {e}")
+
+    def _apply_explorer(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК ПРОВОДНИКА ===")
+        try:
+            from explorer import ExplorerModule, FOLDERS, NAMESPACE_KEY, \
+                IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE
             temp = ttk.Frame(self.parent)
             e = ExplorerModule(temp)
+            temp.pack_forget()
+            ex = config['explorer']
+            is_admin = self._is_admin()
 
-            if 'bitlocker_enabled' in config['explorer']:
-                target = config['explorer']['bitlocker_enabled'].lower() == 'true'
-                if target != e.bitlocker_enabled:
-                    e.toggle_bitlocker()
-            if 'photo_viewer_enabled' in config['explorer']:
-                target = config['explorer']['photo_viewer_enabled'].lower() == 'true'
-                if target != e.photo_viewer_enabled:
-                    e.toggle_photo_viewer()
-            if 'show_file_extensions' in config['explorer']:
-                target = config['explorer']['show_file_extensions'].lower() == 'true'
-                if target != e.file_ext_enabled:
+            def _target(k):
+                return ex[k].lower() == 'true' if k in ex else None
+
+            applied = 0
+            skipped = 0
+            failed = 0
+
+            # --- BitLocker (HKCR → нужны права администратора) ---
+            if 'bitlocker_enabled' in ex:
+                tgt = _target('bitlocker_enabled')
+                if tgt != e.bitlocker_enabled:
+                    if not is_admin:
+                        self._log("  bitlocker_enabled: пропущено (нужны права администратора)")
+                        skipped += 1
+                    else:
+                        e.toggle_bitlocker()
+                        if e.bitlocker_enabled == tgt:
+                            self._log(f"  bitlocker_enabled: -> {tgt} (OK)")
+                            applied += 1
+                        else:
+                            self._log("  bitlocker_enabled: не удалось применить")
+                            failed += 1
+                else:
+                    self._log(f"  bitlocker_enabled: без изменений ({tgt})")
+
+            # --- Photo Viewer (HKLM → нужны права администратора) ---
+            if 'photo_viewer_enabled' in ex:
+                tgt = _target('photo_viewer_enabled')
+                if tgt != e.photo_viewer_enabled:
+                    if not is_admin:
+                        self._log("  photo_viewer_enabled: пропущено (нужны права администратора)")
+                        skipped += 1
+                    else:
+                        e.toggle_photo_viewer()
+                        if e.photo_viewer_enabled == tgt:
+                            self._log(f"  photo_viewer_enabled: -> {tgt} (OK)")
+                            applied += 1
+                        else:
+                            self._log("  photo_viewer_enabled: не удалось применить")
+                            failed += 1
+                else:
+                    self._log(f"  photo_viewer_enabled: без изменений ({tgt})")
+
+            # --- Расширения файлов (HKCU) ---
+            if 'show_file_extensions' in ex:
+                tgt = _target('show_file_extensions')
+                if tgt != e.file_ext_enabled:
                     e.toggle_file_ext()
-            if 'recent_folders_enabled' in config['explorer']:
-                target = config['explorer']['recent_folders_enabled'].lower() == 'true'
-                if target != e.recent_folders_enabled:
+                    if e.file_ext_enabled == tgt:
+                        self._log(f"  show_file_extensions: -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log("  show_file_extensions: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  show_file_extensions: без изменений ({tgt})")
+
+            # --- Недавние папки (HKCU) ---
+            if 'recent_folders_enabled' in ex:
+                tgt = _target('recent_folders_enabled')
+                if tgt != e.recent_folders_enabled:
                     e.toggle_recent_folders()
+                    if e.recent_folders_enabled == tgt:
+                        self._log(f"  recent_folders_enabled: -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log("  recent_folders_enabled: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  recent_folders_enabled: без изменений ({tgt})")
+
+            # --- Дополнительные сведения об этом изображении ---
+            if 'image_details_hidden' in ex:
+                tgt = _target('image_details_hidden')
+                supported = getattr(e, 'image_details_supported', False)
+                cur = getattr(e, 'image_details_hidden', None)
+                if not supported:
+                    self._log("  image_details_hidden: пропущено (не поддерживается на этой версии)")
+                    skipped += 1
+                elif cur is None:
+                    self._log("  image_details_hidden: состояние недоступно")
+                    skipped += 1
+                elif tgt != cur:
+                    e.toggle_image_details()
+                    if e.image_details_hidden == tgt:
+                        self._log(f"  image_details_hidden: -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log("  image_details_hidden: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  image_details_hidden: без изменений ({tgt})")
+
+            # --- Папки в "Этот компьютер" (HKLM → нужны права администратора) ---
+            for guid in FOLDERS:
+                key = f'folder_{guid}'
+                if key not in ex:
+                    continue
+                tgt = _target(key)
+                reg_path = f"{NAMESPACE_KEY}\\{guid}"
+                cur = _reg('query', reg_path).returncode == 0
+                if tgt == cur:
+                    self._log(f"  {key}: без изменений ({tgt})")
+                    skipped += 1
+                    continue
+                if not is_admin:
+                    self._log(f"  {key}: пропущено (нужны права администратора)")
+                    skipped += 1
+                    continue
+                if tgt:
+                    _reg('add', reg_path, '/f')
+                    ok = _reg('query', reg_path).returncode == 0
+                else:
+                    _reg('delete', reg_path, '/f')
+                    ok = _reg('query', reg_path).returncode != 0
+                if ok:
+                    self._log(f"  {key}: -> {tgt} (OK)")
+                    applied += 1
+                else:
+                    self._log(f"  {key}: не удалось применить")
+                    failed += 1
 
             e.hide()
             temp.destroy()
+            self._log(f"  Итог explorer: применено {applied}, "
+                      f"без изменений {skipped}, ошибок {failed}")
         except Exception as e:
-            self.log_to_file(f"  ОШИБКА explorer: {e}", "apply_settings.log")
+            self._log(f"  ОШИБКА explorer: {e}")
 
-    def _apply_desktop_icons(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК ИКОНОК РАБОЧЕГО СТОЛА ===", "apply_settings.log")
-        recycle_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon"
+    def _apply_desktop(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК ИКОНОК РАБОЧЕГО СТОЛА ===")
+        current_dll = self._get_current_imaster_path()
+        if current_dll:
+            self._log(f"  Текущий imaster.dll: {current_dll}")
+        else:
+            self._log("  imaster.dll не найден — пути imaster.dll останутся "
+                      "как в INI (могут не работать)")
 
+        applied = 0
+        skipped_system = 0
         for key, value in config['desktop'].items():
             if not key.startswith('icon_'):
                 continue
             icon_type = key.replace('icon_', '')
-            self.log_to_file(f"  {icon_type} = {value}", "apply_settings.log")
 
-            if icon_type == 'user':
-                path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{59031A47-3F72-44A7-89C5-5595FE6B30EE}\DefaultIcon"
-                subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
-            elif icon_type == 'computer':
-                path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\DefaultIcon"
-                subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
-            elif icon_type == 'network':
-                path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon"
-                subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
+            if not self._is_imaster_icon(value):
+                self._log(f"  {icon_type}: пропущено (системная иконка, "
+                          f"не imaster.dll): {value}")
+                skipped_system += 1
+                continue
+
+            real_value = self._deserialize_icon(value, current_dll)
+            self._log(f"  {icon_type} = {value} -> {real_value}")
+
+            if icon_type in ('user', 'computer', 'network'):
+                _reg('add', DESKTOP_ICON_PATHS[icon_type], '/ve', '/d', real_value, '/f')
             elif icon_type == 'recycle_bin_empty':
-                subprocess.run(['reg', 'add', recycle_path, '/ve', '/d', str(value), '/f'], capture_output=True)
+                _reg('add', RECYCLE_PATH, '/ve', '/d', real_value, '/f')
             elif icon_type == 'recycle_bin_full':
-                subprocess.run(['reg', 'add', recycle_path, '/v', 'Full', '/d', str(value), '/f'], capture_output=True)
+                _reg('add', RECYCLE_PATH, '/v', 'Full', '/d', real_value, '/f')
             elif icon_type == 'libraries':
-                path = r"HKCR\CLSID\{031E4825-7B94-4dc3-B131-E946B44C8DD5}\DefaultIcon"
-                subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
-            elif icon_type.startswith('control_panel'):
-                if icon_type == 'control_panel':
-                    clsid_list = [
-                        '{26EE0668-A00A-44D7-9371-BEB064C98683}',
-                        '{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}',
-                        '{21EC2020-3AEA-1069-A2DD-08002B30309D}'
-                    ]
-                    for clsid in clsid_list:
-                        path = rf"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{clsid}\DefaultIcon"
-                        subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
-                else:
-                    clsid = icon_type.replace('control_panel_', '')
-                    path = rf"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{clsid}\DefaultIcon"
-                    subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
+                _reg('add', DESKTOP_ICON_PATHS['libraries'], '/ve', '/d', real_value, '/f')
+            elif icon_type == 'control_panel':
+                for clsid in CONTROL_PANEL_CLSIDS:
+                    path = (f"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CLSID\\"
+                            f"{clsid}\\DefaultIcon")
+                    _reg('add', path, '/ve', '/d', real_value, '/f')
+            elif icon_type.startswith('control_panel_'):
+                clsid = icon_type.replace('control_panel_', '')
+                path = (f"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\CLSID\\"
+                        f"{clsid}\\DefaultIcon")
+                _reg('add', path, '/ve', '/d', real_value, '/f')
+            applied += 1
 
-        subprocess.run(['ie4uinit.exe', '-show'], capture_output=True)
-        self.log_to_file("  Иконки рабочего стола применены", "apply_settings.log")
+        if applied:
+            subprocess.run(['ie4uinit.exe', '-show'], capture_output=True,
+                           creationflags=CREATE_NO_WINDOW)
+        self._log(f"  Итог: применено {applied}, "
+                  f"пропущено (системные) {skipped_system}")
 
-    def _apply_disk_icons(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК ИКОНОК ДИСКОВ ===", "apply_settings.log")
-        subprocess.run(
-            ['reg', 'delete', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons', '/f'],
-            capture_output=True)
+    def _apply_disk(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК ИКОНОК ДИСКОВ ===")
+        current_dll = self._get_current_imaster_path()
+        if current_dll:
+            self._log(f"  Текущий imaster.dll: {current_dll}")
+        else:
+            self._log("  imaster.dll не найден — пути imaster.dll останутся "
+                      "как в INI (могут не работать)")
+
+        try:
+            import ctypes
+            bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        except Exception:
+            bitmask = 0
+
+        def _drive_exists(letter):
+            idx = ord(letter.upper()) - ord('A')
+            if 0 <= idx < 26:
+                return bool(bitmask & (1 << idx))
+            return False
+
+        _reg('delete', DRIVE_ICONS, '/f')
+
+        applied = 0
+        skipped_missing = 0
+        skipped_system = 0
         for key, value in config['disk'].items():
-            if key.startswith('icon_') and value:
-                drive = key.replace('icon_', '').upper()
-                if len(drive) == 1 and drive.isalpha():
-                    path = f"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\{drive}\\DefaultIcon"
-                    subprocess.run(['reg', 'add', path, '/ve', '/d', str(value), '/f'], capture_output=True)
-                    self.log_to_file(f"  Диск {drive}: {value}", "apply_settings.log")
+            if not (key.startswith('icon_') and value):
+                continue
+            drive = key.replace('icon_', '').upper()
+            if not (len(drive) == 1 and drive.isalpha()):
+                self._log(f"  {key}: некорректная буква диска, пропущено")
+                skipped_missing += 1
+                continue
 
-    def _apply_contextmenu_settings(self, config):
-        self.log_to_file("=== ПРИМЕНЕНИЕ НАСТРОЕК КОНТЕКСТНОГО МЕНЮ ===", "apply_settings.log")
+            if not self._is_imaster_icon(value):
+                self._log(f"  Диск {drive}: пропущено (системная иконка, "
+                          f"не imaster.dll): {value}")
+                skipped_system += 1
+                continue
+
+            if not _drive_exists(drive):
+                self._log(f"  Диск {drive}: пропущен (диск отсутствует в системе)")
+                skipped_missing += 1
+                continue
+
+            real_value = self._deserialize_icon(value, current_dll)
+            path = f"{DRIVE_ICONS}\\{drive}\\DefaultIcon"
+            _reg('add', path, '/ve', '/d', real_value, '/f')
+            self._log(f"  Диск {drive}: {value} -> {real_value}")
+            applied += 1
+
+        self._log(f"  Итог: применено {applied}, "
+                  f"пропущено (нет диска) {skipped_missing}, "
+                  f"пропущено (системные) {skipped_system}")
+
+    def _apply_contextmenu(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК КОНТЕКСТНОГО МЕНЮ ===")
         try:
-            from contextmenu import ContextMenuModule
+            from contextmenu import DesktopMenuTab
             temp = ttk.Frame(self.parent)
-            c = ContextMenuModule(temp)
-
-            menu_mapping = {
-                'copy_as_path': 'Копировать как путь',
-                'pin_to_start': 'Закрепить на начальном экране',
-                'pin_to_taskbar': 'Закрепить на Панели задач',
-                'take_ownership': 'Стать владельцем',
-                'copy_move': 'Копировать/Переместить в папку',
-                'admin_menu': 'Администрирование',
-                'system_menu': 'Система',
-                'task_manager': 'Диспетчер задач',
-                'restart_explorer': 'Перезапустить explorer',
-                'clipboard_clear': 'Очистить буфер',
-                'regedit': 'Редактор реестра',
-                'power_menu': 'Выключение/Перезагрузка/Гибернация'
-            }
-
-            if hasattr(c, 'desktop_menu_tab'):
-                dt = c.desktop_menu_tab
-                for key, target_state in config['contextmenu'].items():
-                    target = target_state.lower() == 'true'
-                    menu_name = menu_mapping.get(key, key)
-                    for btn_info in dt.menu_item_buttons:
-                        item = btn_info['data']
-                        if item['name'] == menu_name:
-                            current = item['check_command']()
-                            if current != target:
-                                if target:
-                                    item['add_command']()
-                                else:
-                                    item['remove_command']()
-                            break
-
-            c.hide()
+            dt = DesktopMenuTab(temp)
+            applied = 0
+            skipped = 0
+            not_found = 0
+            for key, state in config['contextmenu'].items():
+                target = state.lower() == 'true'
+                menu_name = CONTEXT_MENU_MAP.get(key, key)
+                found = False
+                for btn_info in dt.menu_item_buttons:
+                    item = btn_info['data']
+                    if item['name'] == menu_name:
+                        found = True
+                        cur = item['check_command']()
+                        if cur != target:
+                            (item['add_command'] if target else item['remove_command'])()
+                            self._log(f"  {key}: {cur} -> {target}")
+                            applied += 1
+                        else:
+                            self._log(f"  {key}: без изменений ({target})")
+                            skipped += 1
+                        break
+                if not found:
+                    self._log(f"  {key}: пункт '{menu_name}' не найден в UI")
+                    not_found += 1
             temp.destroy()
+            self._log(f"  Итог contextmenu: применено {applied}, "
+                      f"без изменений {skipped}, не найдено {not_found}")
         except Exception as e:
-            self.log_to_file(f"  ОШИБКА contextmenu: {e}", "apply_settings.log")
+            self._log(f"  ОШИБКА contextmenu: {e}")
 
-    def restart_explorer_silent(self):
+    def _apply_createnew(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК МЕНЮ 'СОЗДАТЬ' ===")
         try:
-            subprocess.run(['taskkill', '/f', '/im', 'explorer.exe'], capture_output=True)
-            import time
-            time.sleep(0.5)
-            subprocess.Popen(['explorer.exe'])
+            from createnew import (
+                _reg_exists, _rename_key, _ensure_shellnew,
+                TARGET_EXTENSIONS, MS_EXTENSIONS,
+                _ext_registered, _find_shellnew_under_ext, _classify_provider,
+            )
+            import winreg as _wr
+            cn = config['createnew']
+
+            def _target(key):
+                return cn[key].strip().lower() == 'true' if key in cn else None
+
+            def _set_state(hive, base_path, enabled, label):
+                try:
+                    if enabled:
+                        if _reg_exists(hive, base_path + '_no'):
+                            _rename_key(hive, base_path + '_no', base_path)
+                        elif not _reg_exists(hive, base_path):
+                            _ensure_shellnew(hive, base_path)
+                        self._log(f"  {label}: включено")
+                    else:
+                        if _reg_exists(hive, base_path):
+                            _rename_key(hive, base_path, base_path + '_no')
+                        self._log(f"  {label}: отключено")
+                except Exception as e:
+                    self._log(f"  ОШИБКА {label}: {e}")
+
+            folder_state = _target('folder')
+            if folder_state is not None:
+                _set_state(_wr.HKEY_CLASSES_ROOT, r'Folder\ShellNew',
+                           folder_state, 'folder')
+
+            for ext, path in TARGET_EXTENSIONS.items():
+                state = _target(ext.lstrip('.'))
+                if state is None:
+                    continue
+                _set_state(_wr.HKEY_LOCAL_MACHINE, path, state, ext)
+
+            ini_providers = {}
+            for key, value in cn.items():
+                if key.startswith('provider_'):
+                    pid = key[len('provider_'):]
+                    ini_providers[pid] = value.strip().lower() == 'true'
+
+            installed = {}
+            for ext in MS_EXTENSIONS:
+                if not _ext_registered(ext):
+                    continue
+                for hive in (_wr.HKEY_LOCAL_MACHINE, _wr.HKEY_CURRENT_USER):
+                    for h, path, cls, current_enabled in _find_shellnew_under_ext(hive, ext):
+                        pid, _display, _vendor = _classify_provider(cls, ext)
+                        if pid in installed:
+                            continue
+                        installed[pid] = (h, path, current_enabled, cls)
+
+            if not ini_providers:
+                self._log("  Офисные пункты: в INI нет ни одного provider_*, "
+                          "пропущено всё")
+            elif not installed:
+                self._log("  Офисные пункты: в системе нет ни одного офисного "
+                          "клиента, пропущено всё")
+                self._log(f"    (в INI было: {', '.join(sorted(ini_providers))})")
+            else:
+                applied = 0
+                skipped_not_installed = 0
+                untouched = sorted(set(installed) - set(ini_providers))
+                for pid, target in ini_providers.items():
+                    if pid not in installed:
+                        self._log(f"  {pid}: пропущено (не установлен)")
+                        skipped_not_installed += 1
+                        continue
+                    hive, path, current_enabled, cls = installed[pid]
+                    if target == current_enabled:
+                        self._log(f"  {pid} ({cls}): без изменений "
+                                  f"({'включено' if target else 'отключено'})")
+                        continue
+                    try:
+                        if target:
+                            if path.endswith('_no'):
+                                _rename_key(hive, path, path[:-3])
+                            self._log(f"  {pid} ({cls}): включено")
+                        else:
+                            if not path.endswith('_no'):
+                                _rename_key(hive, path, path + '_no')
+                            self._log(f"  {pid} ({cls}): отключено")
+                        applied += 1
+                    except Exception as e:
+                        self._log(f"  ОШИБКА {pid}: {e}")
+
+                if untouched:
+                    self._log(f"  Не тронуты (есть в системе, но нет в INI): "
+                              f"{', '.join(untouched)}")
+                self._log(f"  Итог: применено {applied}, "
+                          f"пропущено (нет в системе) {skipped_not_installed}")
+        except Exception as e:
+            self._log(f"  ОШИБКА createnew: {e}")
+
+    def _apply_sendto(self, config):
+        self._log("=== ПРИМЕНЕНИЕ НАСТРОЕК МЕНЮ 'ОТПРАВИТЬ' ===")
+        try:
+            import ctypes
+            sendto_path = os.path.join(os.environ.get('APPDATA', ''),
+                                       'Microsoft', 'Windows', 'SendTo')
+            if not os.path.isdir(sendto_path):
+                self._log("  Папка SendTo не найдена")
+                return
+            for name, value in config['sendto'].items():
+                full = os.path.join(sendto_path, name)
+                if not os.path.exists(full):
+                    self._log(f"  {name}: файл не найден")
+                    continue
+                attrs = ctypes.windll.kernel32.GetFileAttributesW(full)
+                if attrs == -1:
+                    continue
+                visible = value.strip().lower() == 'true'
+                new_attrs = (attrs & ~0x2) if visible else (attrs | 0x2)
+                ctypes.windll.kernel32.SetFileAttributesW(full, new_attrs)
+                self._log(f"  {name}: {'виден' if visible else 'скрыт'}")
+        except Exception as e:
+            self._log(f"  ОШИБКА sendto: {e}")
+
+    # ---------- logging ----------
+    @staticmethod
+    def _log(message, log_name="apply_settings.log"):
+        try:
+            path = os.path.join(os.path.expanduser("~"), "Desktop", log_name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {message}\n")
         except Exception:
             pass
 
-    def check_modified_files(self):
+    # ---------- reset all ----------
+    def _check_modified_files(self):
         modified = []
-        for fname, expected in self.mod_expected_hashes.items():
+        for fname, expected in MOD_EXPECTED_HASHES.items():
             path = os.path.join(os.environ["WINDIR"], "System32", fname)
-            if os.path.exists(path):
-                try:
-                    with open(path, "rb") as f:
-                        h = hashlib.sha256(f.read()).hexdigest().upper()
-                    if h == expected.upper():
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    if hashlib.sha256(f.read()).hexdigest().upper() == expected.upper():
                         modified.append(fname)
-                except Exception:
-                    pass
+            except Exception:
+                pass
         return modified
 
-    def restore_modified_files(self):
-        restored = []
-        for fname in self.mod_expected_hashes:
+    def _restore_modified_files(self):
+        for fname in MOD_EXPECTED_HASHES:
             path = os.path.join(os.environ["WINDIR"], "System32", fname)
             backup = f"{path}_orig"
-            if os.path.exists(path):
-                try:
-                    with open(path, "rb") as f:
-                        if hashlib.sha256(f.read()).hexdigest().upper() == self.mod_expected_hashes[fname].upper():
-                            subprocess.run("taskkill /f /im explorer.exe", shell=True, capture_output=True)
-                            os.remove(path)
-                            if os.path.exists(backup):
-                                os.rename(backup, path)
-                                restored.append(fname)
-                except Exception:
-                    pass
-        return restored
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "rb") as f:
+                    h = hashlib.sha256(f.read()).hexdigest().upper()
+                if h == MOD_EXPECTED_HASHES[fname].upper():
+                    subprocess.run("taskkill /f /im explorer.exe", shell=True,
+                                   capture_output=True,
+                                   creationflags=CREATE_NO_WINDOW)
+                    os.remove(path)
+                    if os.path.exists(backup):
+                        os.rename(backup, path)
+            except Exception:
+                pass
 
     def reset_all_settings(self):
-        modified = self.check_modified_files()
-        msg = "ВНИМАНИЕ! Это действие сбросит все настройки к стандартным значениям Windows.\n\n"
-        msg += "Будут сброшены:\n• Иконки рабочего стола\n• Иконки дисков\n• Стрелки ярлыков\n"
-        msg += "• Текст '- ярлык'\n• Пункты контекстного меню\n• Настройки Проводника\n• Настройки Панели задач\n"
+        modified = self._check_modified_files()
+        msg = ("ВНИМАНИЕ! Это действие сбросит все настройки к стандартным значениям Windows.\n\n"
+               "Будут сброшены:\n• Иконки рабочего стола\n• Иконки дисков\n"
+               "• Стрелки ярлыков\n• Текст '- ярлык'\n• Пункты контекстного меню\n"
+               "• Настройки Проводника\n• Настройки Панели задач\n"
+               "• Пункты меню 'Создать'\n• Пункты меню 'Отправить'\n")
         if modified:
             msg += "\n⚠️ БУДУТ ВОССТАНОВЛЕНЫ МОДИФИЦИРОВАННЫЕ ФАЙЛЫ:\n"
             for f in modified:
@@ -782,29 +1335,32 @@ class AboutModule:
         errors = []
 
         if modified:
-            self.restore_modified_files()
+            self._restore_modified_files()
 
+        # ----- desktop -----
         try:
             from desktop import Module as DesktopModule
             temp = ttk.Frame(self.parent)
             d = DesktopModule(temp, module_name="desktop")
+            temp.pack_forget()
             d.reset_icons()
             d.hide()
             temp.destroy()
         except Exception as e:
             errors.append(f"desktop: {e}")
 
+        # ----- disk -----
         try:
-            subprocess.run(
-                ['reg', 'delete', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons', '/f'],
-                capture_output=True)
+            _reg('delete', DRIVE_ICONS, '/f')
         except Exception as e:
             errors.append(f"disk: {e}")
 
+        # ----- str -----
         try:
             from str import Module as StrModule
             temp = ttk.Frame(self.parent)
             s = StrModule(temp)
+            temp.pack_forget()
             s.arrow_choice.set(1)
             s.shortcut_text_choice.set(1)
             s.apply_changes()
@@ -813,52 +1369,140 @@ class AboutModule:
         except Exception as e:
             errors.append(f"str: {e}")
 
+        # ----- contextmenu (напрямую DesktopMenuTab, silent=True, без мигания) -----
         try:
-            from contextmenu import ContextMenuModule
+            from contextmenu import DesktopMenuTab
             temp = ttk.Frame(self.parent)
-            c = ContextMenuModule(temp)
-            if hasattr(c, 'desktop_menu_tab'):
-                c.desktop_menu_tab.set_default_settings()
-            c.hide()
+            dt = DesktopMenuTab(temp)
+            dt.set_default_settings(silent=True)
             temp.destroy()
         except Exception as e:
             errors.append(f"contextmenu: {e}")
 
+        # ----- explorer -----
         try:
-            from explorer import ExplorerModule
+            from explorer import ExplorerModule, IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE
             temp = ttk.Frame(self.parent)
             e = ExplorerModule(temp)
-            for guid in e.folders:
-                e.checkbox_vars[guid].set(True)
-            e.apply_folder_changes()
-            if not e.bitlocker_enabled:
+            temp.pack_forget()
+            is_admin = self._is_admin()
+
+            # Папки в "Этот компьютер" (HKLM → нужны права). По умолчанию ВСЕ ПОКАЗАНЫ.
+            if is_admin:
+                for guid in e.checkbox_vars:
+                    e.checkbox_vars[guid].set(True)
+                e.apply_folder_changes()
+
+            # BitLocker (HKCR → нужны права). По умолчанию ПОКАЗАН.
+            if is_admin and not e.bitlocker_enabled:
                 e.toggle_bitlocker()
-            if not e.photo_viewer_enabled:
+
+            # Photo Viewer (HKLM → нужны права). По умолчанию ОТКЛЮЧЁН.
+            if is_admin and e.photo_viewer_enabled:
                 e.toggle_photo_viewer()
+
+            # Расширения файлов (HKCU). По умолчанию СКРЫТЫ.
             if e.file_ext_enabled:
                 e.toggle_file_ext()
+
+            # Недавние папки (HKCU). По умолчанию ВКЛЮЧЕНЫ.
+            if not e.recent_folders_enabled:
+                e.toggle_recent_folders()
+
+            # Дополнительные сведения об изображении. По умолчанию ПОКАЗАН (hidden=False).
+            if getattr(e, 'image_details_supported', False):
+                if getattr(e, 'image_details_hidden', False):
+                    e.toggle_image_details()
+            else:
+                _reg('delete', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE, '/f')
+
             e.hide()
             temp.destroy()
         except Exception as e:
             errors.append(f"explorer: {e}")
 
+        # ----- taskbar -----
         try:
             from taskbar import Module as TaskbarModule
             temp = ttk.Frame(self.parent)
             t = TaskbarModule(temp)
-            t.reset_all_settings()
+            temp.pack_forget()
+            t.reset_all_settings() if hasattr(t, 'reset_all_settings') else t._reset_all()
             t.hide()
             temp.destroy()
         except Exception as e:
             errors.append(f"taskbar: {e}")
 
-        self.restart_explorer_silent()
+        # ----- createnew -----
+        try:
+            from createnew import (
+                _reg_exists, _rename_key,
+                TARGET_EXTENSIONS, MS_EXTENSIONS,
+                _ext_registered, _find_shellnew_under_ext,
+            )
+            import winreg as _wr
+
+            def _enable(hive, base):
+                try:
+                    if _reg_exists(hive, base + '_no'):
+                        _rename_key(hive, base + '_no', base)
+                except Exception:
+                    pass
+
+            _enable(_wr.HKEY_CLASSES_ROOT, r'Folder\ShellNew')
+            for _, path in TARGET_EXTENSIONS.items():
+                _enable(_wr.HKEY_LOCAL_MACHINE, path)
+
+            for ext in MS_EXTENSIONS:
+                if not _ext_registered(ext):
+                    continue
+                for hive in (_wr.HKEY_LOCAL_MACHINE, _wr.HKEY_CURRENT_USER):
+                    for h, path, cls, enabled in _find_shellnew_under_ext(hive, ext):
+                        if path.endswith('_no'):
+                            try:
+                                _rename_key(h, path, path[:-3])
+                            except Exception:
+                                pass
+        except Exception as e:
+            errors.append(f"createnew: {e}")
+
+        # ----- sendto -----
+        try:
+            import ctypes
+            sendto_path = os.path.join(os.environ.get('APPDATA', ''),
+                                       'Microsoft', 'Windows', 'SendTo')
+            if os.path.isdir(sendto_path):
+                for name in os.listdir(sendto_path):
+                    if name.lower() == 'desktop.ini':
+                        continue
+                    full = os.path.join(sendto_path, name)
+                    if not (os.path.isfile(full) or os.path.islink(full)):
+                        continue
+                    attrs = ctypes.windll.kernel32.GetFileAttributesW(full)
+                    if attrs == -1:
+                        continue
+                    ctypes.windll.kernel32.SetFileAttributesW(full, attrs & ~0x2)
+        except Exception as e:
+            errors.append(f"sendto: {e}")
+
+        self._restart_explorer_silent()
 
         if errors:
             messagebox.showwarning("Сброс завершён с ошибками", "\n".join(errors[:5]))
         else:
             messagebox.showinfo("Успех", "Все настройки успешно сброшены!")
 
+    @staticmethod
+    def _restart_explorer_silent():
+        try:
+            subprocess.run(['taskkill', '/f', '/im', 'explorer.exe'],
+                           capture_output=True, creationflags=CREATE_NO_WINDOW)
+            time.sleep(0.5)
+            subprocess.Popen(['explorer.exe'], creationflags=CREATE_NO_WINDOW)
+        except Exception:
+            pass
+
+    # ---------- show/hide ----------
     def show(self):
         self.frame.pack(fill=tk.BOTH, expand=True)
 

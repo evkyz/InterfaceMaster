@@ -1,228 +1,209 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
 import hashlib
 import os
 import subprocess
+import tkinter as tk
 import tkinter.filedialog as filedialog
+from tkinter import ttk, messagebox
+
+EXPECTED_HASHES = {
+    "imageres.dll": "DDD5D7462A26F7837CD02A7667615354F9377A0A727BF880D825676D6DDC4CB7",
+    "imagesp1.dll": "466E64D491C7B3D7051FBDC0907CD813D7A6435D18BF4B00CE0C3191B80E0541",
+    "networkexplorer.dll": "7BF68211CFBDDE2E377C992CEC2F5A0C1F41B1F12BE3A99733A549AB63A8C961",
+    "DDORes.dll": "4802C8F0BAAE3765FDFF16F09F56647B1C8B20889E4C531B773442EC068CBC3B",
+    "mmres.dll": "4651BB26196D0ED493A26F4E401C8FAC0465E7F9DE2ECFED1642155A6EAF3703",
+}
+
+FILES_INFO = {
+    "imageres.dll": "Основные иконки системы",
+    "imagesp1.dll": "Дополнительные иконки",
+    "networkexplorer.dll": "Иконки сети и проводника",
+    "DDORes.dll": "Иконки DDE",
+    "mmres.dll": "Иконки звука",
+}
+
+SYSTEM32 = os.path.join(os.environ["WINDIR"], "System32")
+
+
+def _sha256_file(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest().lower()
 
 
 class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-
         self.selected_folder = None
-
-        self.file_vars = {
-            "imageres.dll": tk.BooleanVar(value=False),
-            "imagesp1.dll": tk.BooleanVar(value=False),
-            "networkexplorer.dll": tk.BooleanVar(value=False),
-            "DDORes.dll": tk.BooleanVar(value=False),
-            "mmres.dll": tk.BooleanVar(value=False)
-        }
-
-        self.expected_hashes = {
-            "imageres.dll": "DDD5D7462A26F7837CD02A7667615354F9377A0A727BF880D825676D6DDC4CB7",
-            "imagesp1.dll": "466E64D491C7B3D7051FBDC0907CD813D7A6435D18BF4B00CE0C3191B80E0541",
-            "networkexplorer.dll": "7BF68211CFBDDE2E377C992CEC2F5A0C1F41B1F12BE3A99733A549AB63A8C961",
-            "DDORes.dll": "4802C8F0BAAE3765FDFF16F09F56647B1C8B20889E4C531B773442EC068CBC3B",
-            "mmres.dll": "4651BB26196D0ED493A26F4E401C8FAC0465E7F9DE2ECFED1642155A6EAF3703"
-        }
-
+        self.file_vars = {name: tk.BooleanVar(value=False) for name in EXPECTED_HASHES}
         self.start_button = None
         self.restore_button = None
         self.system_file_status = {}
+        self.status_labels = {}
 
-        self.create_widgets()
-        self.check_system_files_status()
-        self.update_buttons_state()
+        self._create_widgets()
+        self._check_system_files_status()
+        self._update_buttons_state()
         self.show()
 
-    def create_tooltip(self, widget, text):
-        def on_enter(event):
-            tooltip = tk.Toplevel()
-            tooltip.wm_overrideredirect(True)
-            tooltip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-            tk.Label(tooltip, text=text, background="lightyellow",
+    def _create_tooltip(self, widget, text):
+        def enter(event):
+            tip = tk.Toplevel()
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
+            tk.Label(tip, text=text, background="lightyellow",
                      relief="solid", borderwidth=1, font=("Arial", 8)).pack()
-            widget.tooltip = tooltip
+            widget.tooltip = tip
 
-        def on_leave(event):
-            if hasattr(widget, 'tooltip') and widget.tooltip:
+        def leave(event):
+            if getattr(widget, 'tooltip', None):
                 widget.tooltip.destroy()
                 widget.tooltip = None
 
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
 
-    def create_widgets(self):
+    def _create_widgets(self):
         ttk.Label(self.frame, text="Модификация системных DLL-файлов",
                   font=('Arial', 16, 'bold'), foreground='#2c3e50').pack(pady=10)
-
         ttk.Label(self.frame,
                   text="Данная функция позволяет добавить в систему модифицированные файлы\n"
                        "содержащие иконки от Windows 7. Выберите файлы для модификации:",
-                  font=('Arial', 10), foreground='#7f8c8d', justify="center").pack(pady=(0, 20))
+                  font=('Arial', 10), foreground='#7f8c8d',
+                  justify="center").pack(pady=(0, 20))
 
-        settings_frame = ttk.LabelFrame(self.frame, text="Настройки модификации", padding=15)
-        settings_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        settings = ttk.LabelFrame(self.frame, text="Настройки модификации", padding=15)
+        settings.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-        self.select_folder_button = ttk.Button(
-            settings_frame,
-            text="Выбрать папку с модифицированными файлами",
-            command=self.select_folder, width=40)
-        self.select_folder_button.pack(pady=8, fill=tk.X)
-        self.create_tooltip(self.select_folder_button,
-                            "Выберите папку, содержащую модифицированные DLL-файлы")
+        select_btn = ttk.Button(settings,
+                                text="Выбрать папку с модифицированными файлами",
+                                command=self._select_folder, width=40)
+        select_btn.pack(pady=8, fill=tk.X)
+        self._create_tooltip(select_btn,
+                             "Выберите папку, содержащую модифицированные DLL-файлы")
 
-        self.result_label = ttk.Label(settings_frame, text="", foreground="red")
+        self.result_label = ttk.Label(settings, text="", foreground="red")
         self.result_label.pack(pady=5)
 
-        checkbox_frame = ttk.Frame(settings_frame)
+        checkbox_frame = ttk.Frame(settings)
         checkbox_frame.pack(pady=10, fill=tk.X)
-
         ttk.Label(checkbox_frame, text="Выберите файлы для модификации:",
                   font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 10))
 
-        files_info = {
-            "imageres.dll": "Основные иконки системы",
-            "imagesp1.dll": "Дополнительные иконки",
-            "networkexplorer.dll": "Иконки сети и проводника",
-            "DDORes.dll": "Иконки DDE",
-            "mmres.dll": "Иконки звука"
-        }
+        for filename, description in FILES_INFO.items():
+            row = ttk.Frame(checkbox_frame)
+            row.pack(fill=tk.X, pady=2)
+            cb = ttk.Checkbutton(row, text=f"{filename} - {description}",
+                                 variable=self.file_vars[filename],
+                                 command=self._update_buttons_state)
+            cb.pack(side=tk.LEFT, anchor=tk.W)
+            self._create_tooltip(cb, f"Включить/выключить модификацию файла {filename}")
+            status = ttk.Label(row, text="", font=('Arial', 8))
+            status.pack(side=tk.RIGHT, padx=5)
+            self.status_labels[filename] = status
 
-        for filename, description in files_info.items():
-            file_frame = ttk.Frame(checkbox_frame)
-            file_frame.pack(fill=tk.X, pady=2)
+        actions = ttk.Frame(settings)
+        actions.pack(pady=15, fill=tk.X)
 
-            checkbox = ttk.Checkbutton(
-                file_frame, text=f"{filename} - {description}",
-                variable=self.file_vars[filename], command=self.update_buttons_state)
-            checkbox.pack(side=tk.LEFT, anchor=tk.W)
-            self.create_tooltip(checkbox,
-                                f"Включить/выключить модификацию файла {filename}")
-
-            system_status_label = ttk.Label(file_frame, text="", font=('Arial', 8))
-            system_status_label.pack(side=tk.RIGHT, padx=5)
-            setattr(self, f"{filename.replace('.', '_')}_system_status", system_status_label)
-
-        action_frame = ttk.Frame(settings_frame)
-        action_frame.pack(pady=15, fill=tk.X)
-
-        self.start_button = ttk.Button(action_frame, text="Начать",
-                                       command=self.start_modification,
-                                       state="disabled")
+        self.start_button = ttk.Button(actions, text="Начать",
+                                       command=self._start_modification, state="disabled")
         self.start_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.create_tooltip(self.start_button,
-                            "Начать процесс модификации выбранных файлов")
+        self._create_tooltip(self.start_button,
+                             "Начать процесс модификации выбранных файлов")
 
-        self.restore_button = ttk.Button(action_frame, text="Восстановить",
-                                         command=self.restore_originals,
+        self.restore_button = ttk.Button(actions, text="Восстановить",
+                                         command=self._restore_originals,
                                          state="disabled")
         self.restore_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.create_tooltip(self.restore_button,
-                            "Восстановить оригинальные версии файлов")
+        self._create_tooltip(self.restore_button,
+                             "Восстановить оригинальные версии файлов")
 
-        view_hash_button = ttk.Button(action_frame, text="Посмотреть хеш",
-                                      command=self.view_hashes)
-        view_hash_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.create_tooltip(view_hash_button,
-                            "Показать хеш-суммы файлов в системе")
+        hash_btn = ttk.Button(actions, text="Посмотреть хеш", command=self._view_hashes)
+        hash_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self._create_tooltip(hash_btn, "Показать хеш-суммы файлов в системе")
 
-        ttk.Label(settings_frame,
-                  text="⚠️ Внимание: Модификация системных файлов \n"
-                       "выполняется на свой страх и риск! \n"
+        ttk.Label(settings,
+                  text="⚠️ Внимание: Модификация системных файлов\n"
+                       "выполняется на свой страх и риск!\n"
                        "Настоятельно рекомендуется сделать точку восстановления системы",
                   font=('Arial', 8), foreground='#e67e22',
                   justify=tk.CENTER).pack(pady=10)
 
-    def check_system_files_status(self):
+    def _check_system_files_status(self):
         self.system_file_status = {}
-        for filename, expected_hash in self.expected_hashes.items():
-            file_path = os.path.join(os.environ["WINDIR"], "System32", filename)
-            status_label = getattr(self, f"{filename.replace('.', '_')}_system_status")
+        for filename, expected in EXPECTED_HASHES.items():
+            path = os.path.join(SYSTEM32, filename)
+            status = self.status_labels[filename]
             try:
-                if os.path.exists(file_path):
-                    with open(file_path, "rb") as f:
-                        file_hash = hashlib.sha256(f.read()).hexdigest().lower()
-                    is_match = file_hash == expected_hash.lower()
+                if os.path.exists(path):
+                    h = _sha256_file(path)
+                    match = h == expected.lower()
                     self.system_file_status[filename] = {
-                        'exists': True, 'matches_expected': is_match, 'hash': file_hash}
-                    status_label.config(
-                        text="✓ В системе" if is_match else "✗ Оригинал",
-                        foreground="green" if is_match else "red")
+                        'exists': True, 'matches_expected': match, 'hash': h}
+                    status.config(text="✓ В системе" if match else "✗ Оригинал",
+                                  foreground="green" if match else "red")
                 else:
                     self.system_file_status[filename] = {
                         'exists': False, 'matches_expected': False, 'hash': None}
-                    status_label.config(text="✗ Отсутствует", foreground="red")
+                    status.config(text="✗ Отсутствует", foreground="red")
             except Exception as e:
                 self.system_file_status[filename] = {
-                    'exists': False, 'matches_expected': False, 'hash': None, 'error': str(e)}
-                status_label.config(text="✗ Ошибка", foreground="red")
+                    'exists': False, 'matches_expected': False, 'hash': None,
+                    'error': str(e)}
+                status.config(text="✗ Ошибка", foreground="red")
 
-    def update_buttons_state(self):
-        selected_files = [f for f, var in self.file_vars.items() if var.get()]
-        if not selected_files:
+    def _update_buttons_state(self):
+        selected = [f for f, v in self.file_vars.items() if v.get()]
+        if not selected:
             self.start_button.config(state="disabled")
             self.restore_button.config(state="disabled")
             return
 
-        any_mismatch = False
-        any_match = False
+        any_mismatch = any_match = False
         all_exist = True
-
-        for filename in selected_files:
-            status = self.system_file_status.get(filename, {})
-            exists = status.get('exists', False)
-            matches = status.get('matches_expected', False)
-            if not exists:
+        for f in selected:
+            s = self.system_file_status.get(f, {})
+            if not s.get('exists'):
                 all_exist = False
-            if matches:
+            if s.get('matches_expected'):
                 any_match = True
             else:
                 any_mismatch = True
 
         self.start_button.config(
-            state="normal" if (any_mismatch and all_exist and self.selected_folder) else "disabled")
+            state="normal" if (any_mismatch and all_exist and self.selected_folder)
+            else "disabled")
         self.restore_button.config(
             state="normal" if (any_match and all_exist) else "disabled")
 
-    def select_folder(self):
-        folder_path = filedialog.askdirectory()
-        if folder_path:
-            system32_path = os.path.join(os.environ["WINDIR"], "System32")
-            if os.path.normcase(folder_path) == os.path.normcase(system32_path):
-                messagebox.showerror("Ошибка", "Выбор папки System32 запрещен!")
-                return
-            self.selected_folder = folder_path
-            self.log_to_file(f"Выбрана папка: {folder_path}")
-            self.check_files_and_show_result()
-            self.update_buttons_state()
+    def _select_folder(self):
+        path = filedialog.askdirectory()
+        if not path:
+            return
+        if os.path.normcase(path) == os.path.normcase(SYSTEM32):
+            messagebox.showerror("Ошибка", "Выбор папки System32 запрещен!")
+            return
+        self.selected_folder = path
+        self._log(f"Выбрана папка: {path}")
+        self._check_files_and_show_result()
+        self._update_buttons_state()
 
-    def check_files_and_show_result(self):
+    def _check_files_and_show_result(self):
         if not self.selected_folder:
             self.result_label.config(text="Папка не выбрана", foreground="red")
             return
-
-        all_files_exist = True
-        all_files_match = True
-
-        for filename, expected_hash in self.expected_hashes.items():
-            file_path = os.path.join(self.selected_folder, filename)
-            if os.path.exists(file_path):
-                with open(file_path, "rb") as f:
-                    file_hash = hashlib.sha256(f.read()).hexdigest().lower()
-                if file_hash != expected_hash.lower():
-                    all_files_match = False
+        all_exist = all_match = True
+        for filename, expected in EXPECTED_HASHES.items():
+            path = os.path.join(self.selected_folder, filename)
+            if os.path.exists(path):
+                if _sha256_file(path) != expected.lower():
+                    all_match = False
             else:
-                all_files_exist = False
-
-        if all_files_exist and all_files_match:
+                all_exist = False
+        if all_exist and all_match:
             self.result_label.config(
                 text="✓ Все файлы присутствуют и соответствуют эталонным хешам",
                 foreground="green")
-        elif all_files_exist:
+        elif all_exist:
             self.result_label.config(
                 text="✓ Все файлы присутствуют, но некоторые не соответствуют хешам",
                 foreground="orange")
@@ -231,226 +212,193 @@ class Module:
                 text="✗ Некоторые файлы отсутствуют или не соответствуют",
                 foreground="red")
 
-    def log_to_file(self, message):
+    def _log(self, message):
         try:
-            log_file_path = os.path.join(os.path.expanduser("~"), "Desktop", "mod.log")
-            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-            with open(log_file_path, "a", encoding="utf-8") as f:
+            log_path = os.path.join(os.path.expanduser("~"), "Desktop", "mod.log")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f:
                 f.write(message + "\n")
-        except Exception as e:
-            print(f"Ошибка записи в лог: {e}")
+        except Exception:
+            pass
 
-    def restore_originals(self):
-        files_to_process = [f for f, var in self.file_vars.items() if var.get()]
-        if not files_to_process:
-            messagebox.showwarning("Предупреждение",
-                                   "Не выбраны файлы для восстановления")
+    def _restore_originals(self):
+        files = [f for f, v in self.file_vars.items() if v.get()]
+        if not files:
+            messagebox.showwarning("Предупреждение", "Не выбраны файлы для восстановления")
             return
 
-        files_need_restore = []
-        for filename in files_to_process:
-            status = self.system_file_status.get(filename, {})
-            if status.get('exists') and status.get('matches_expected'):
-                files_need_restore.append(filename)
-
-        if not files_need_restore:
+        to_restore = [f for f in files
+                      if self.system_file_status.get(f, {}).get('exists')
+                      and self.system_file_status[f].get('matches_expected')]
+        if not to_restore:
             messagebox.showinfo("Информация",
                                 "Выбранные файлы уже являются оригинальными "
                                 "и не требуют восстановления")
             return
 
         try:
-            self.log_to_file("Завершение процесса explorer.exe...")
             subprocess.run("taskkill /f /im explorer.exe", shell=True, check=True)
         except Exception as e:
-            self.log_to_file(f"Ошибка при завершении explorer.exe: {e}")
+            self._log(f"Ошибка при завершении explorer.exe: {e}")
 
-        restored_count = 0
-        for filename in files_need_restore:
-            file_path = os.path.join(os.environ["WINDIR"], "System32", filename)
-            if os.path.exists(file_path):
+        restored = 0
+        for filename in to_restore:
+            target = os.path.join(SYSTEM32, filename)
+            if os.path.exists(target):
                 try:
-                    subprocess.run(f'del "{file_path}" >nul 2>&1', shell=True, check=True)
+                    subprocess.run(f'del "{target}" >nul 2>&1', shell=True, check=True)
                 except Exception:
-                    mod_file_path = f"{file_path}_mod"
                     try:
-                        os.rename(file_path, mod_file_path)
-                        try:
-                            subprocess.run(f'del "{mod_file_path}" >nul 2>&1',
-                                           shell=True, check=True)
-                        except Exception:
-                            pass
+                        os.rename(target, f"{target}_mod")
+                        subprocess.run(f'del "{target}_mod" >nul 2>&1', shell=True,
+                                       check=True)
                     except Exception as e:
-                        self.log_to_file(
-                            f"Ошибка при переименовании файла {filename}: {e}")
-
-            orig_file_path = f"{file_path}_orig"
-            if os.path.exists(orig_file_path):
+                        self._log(f"Ошибка при переименовании {filename}: {e}")
+            orig = f"{target}_orig"
+            if os.path.exists(orig):
                 try:
-                    os.rename(orig_file_path, file_path)
-                    restored_count += 1
+                    os.rename(orig, target)
+                    restored += 1
                 except Exception as e:
-                    self.log_to_file(f"Ошибка при восстановлении файла {filename}: {e}")
-
-            acl_file = f"{file_path}.acl"
-            if os.path.exists(acl_file):
+                    self._log(f"Ошибка при восстановлении {filename}: {e}")
+            acl = f"{target}.acl"
+            if os.path.exists(acl):
                 try:
-                    subprocess.run(f'icacls "{file_path}" /restore "{acl_file}" >nul 2>&1',
+                    subprocess.run(f'icacls "{target}" /restore "{acl}" >nul 2>&1',
                                    shell=True, check=True)
                 except Exception:
                     pass
 
-        try:
-            subprocess.Popen("explorer.exe", shell=True)
-        except Exception:
-            pass
-
-        self.check_system_files_status()
-        self.update_buttons_state()
+        subprocess.Popen("explorer.exe", shell=True)
+        self._check_system_files_status()
+        self._update_buttons_state()
         messagebox.showinfo("Успешно",
-                            f"Восстановление оригинальных DLL-файлов завершено успешно.\n"
-                            f"Восстановлено файлов: {restored_count}")
+                            f"Восстановление оригинальных DLL-файлов завершено.\n"
+                            f"Восстановлено файлов: {restored}")
 
-    def start_modification(self):
+    def _start_modification(self):
         if not self.selected_folder:
-            messagebox.showerror("Ошибка",
-                                 "Выберите папку с модифицированными файлами")
+            messagebox.showerror("Ошибка", "Выберите папку с модифицированными файлами")
+            return
+        files = [f for f, v in self.file_vars.items() if v.get()]
+        if not files:
+            messagebox.showwarning("Предупреждение", "Не выбраны файлы для модификации")
             return
 
-        files_to_process = [f for f, var in self.file_vars.items() if var.get()]
-        if not files_to_process:
-            messagebox.showwarning("Предупреждение",
-                                   "Не выбраны файлы для модификации")
-            return
-
-        files_need_modification = []
-        for filename in files_to_process:
-            status = self.system_file_status.get(filename, {})
-            if status.get('exists') and not status.get('matches_expected'):
-                files_need_modification.append(filename)
-
-        if not files_need_modification:
+        to_modify = [f for f in files
+                     if self.system_file_status.get(f, {}).get('exists')
+                     and not self.system_file_status[f].get('matches_expected')]
+        if not to_modify:
             messagebox.showinfo("Информация",
                                 "Выбранные файлы уже соответствуют эталонным хешам "
                                 "и не требуют модификации")
             return
 
-        missing_files = [f for f in files_need_modification
-                         if not os.path.exists(os.path.join(self.selected_folder, f))]
-        if missing_files:
+        missing = [f for f in to_modify
+                   if not os.path.exists(os.path.join(self.selected_folder, f))]
+        if missing:
             messagebox.showerror("Ошибка",
                                  f"Файлы отсутствуют в выбранной папке: "
-                                 f"{', '.join(missing_files)}!")
+                                 f"{', '.join(missing)}!")
             return
 
         try:
             subprocess.run("taskkill /f /im explorer.exe", shell=True, check=True)
         except Exception as e:
-            self.log_to_file(f"Ошибка при завершении explorer.exe: {e}")
+            self._log(f"Ошибка при завершении explorer.exe: {e}")
 
-        modified_count = 0
-        for filename in files_need_modification:
-            source_file = os.path.join(self.selected_folder, filename)
-            target_file = os.path.join(os.environ["WINDIR"], "System32", filename)
+        modified = 0
+        for filename in to_modify:
+            src = os.path.join(self.selected_folder, filename)
+            target = os.path.join(SYSTEM32, filename)
             try:
-                acl_file = f"{target_file}.acl"
-                subprocess.run(f'icacls "{target_file}" /save "{acl_file}" >nul 2>&1',
+                acl = f"{target}.acl"
+                subprocess.run(f'icacls "{target}" /save "{acl}" >nul 2>&1',
                                shell=True, check=True)
-                subprocess.run(f'takeown /f "{target_file}" /a >nul 2>&1',
+                subprocess.run(f'takeown /f "{target}" /a >nul 2>&1',
                                shell=True, check=True)
-                subprocess.run(f'icacls "{target_file}" /grant "%USERNAME%":(F) >nul 2>&1',
+                subprocess.run(f'icacls "{target}" /grant "%USERNAME%":(F) >nul 2>&1',
                                shell=True, check=True)
 
-                backup_file = f"{target_file}_orig"
-                if os.path.exists(target_file):
-                    os.rename(target_file, backup_file)
+                backup = f"{target}_orig"
+                if os.path.exists(target):
+                    os.rename(target, backup)
 
-                subprocess.run(f'copy "{source_file}" "{target_file}" >nul 2>&1',
-                               shell=True, check=True)
-                modified_count += 1
+                subprocess.run(f'copy "{src}" "{target}" >nul 2>&1', shell=True, check=True)
+                modified += 1
 
-                subprocess.run(f'icacls "{target_file}" /setowner '
+                subprocess.run(f'icacls "{target}" /setowner '
                                f'"NT SERVICE\\TrustedInstaller" >nul 2>&1',
                                shell=True, check=True)
-                subprocess.run(f'icacls "{target_file}" /restore "{acl_file}" >nul 2>&1',
+                subprocess.run(f'icacls "{target}" /restore "{acl}" >nul 2>&1',
                                shell=True, check=True)
             except Exception as e:
-                self.log_to_file(f"Ошибка при обработке файла {filename}: {e}")
+                self._log(f"Ошибка при обработке файла {filename}: {e}")
 
-        try:
-            subprocess.Popen("explorer.exe", shell=True)
-        except Exception as e:
-            self.log_to_file(f"Ошибка при запуске explorer.exe: {e}")
-
-        self.check_system_files_status()
-        self.update_buttons_state()
+        subprocess.Popen("explorer.exe", shell=True)
+        self._check_system_files_status()
+        self._update_buttons_state()
         messagebox.showinfo("Успешно",
-                            f"Модификация системных DLL файлов завершена успешно.\n"
-                            f"Обработано файлов: {modified_count}")
+                            f"Модификация системных DLL файлов завершена.\n"
+                            f"Обработано файлов: {modified}")
 
-    def view_hashes(self):
-        hash_window = tk.Toplevel(self.parent)
-        hash_window.title("Хеш-суммы файлов")
-        hash_window.geometry("840x200")
-        hash_window.resizable(False, False)
+    def _view_hashes(self):
+        win = tk.Toplevel(self.parent)
+        win.title("Хеш-суммы файлов")
+        win.geometry("840x200")
+        win.resizable(False, False)
+        try:
+            icon = os.path.join(os.path.dirname(__file__), "icon.ico")
+            if os.path.exists(icon):
+                win.iconbitmap(icon)
+        except Exception:
+            pass
 
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
-        if os.path.exists(icon_path):
-            try:
-                hash_window.iconbitmap(icon_path)
-            except Exception:
-                pass
-
-        main_frame = ttk.Frame(hash_window)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        ttk.Label(main_frame, text="Хеш-суммы файлов в системе:",
+        main = ttk.Frame(win)
+        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        ttk.Label(main, text="Хеш-суммы файлов в системе:",
                   font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
-        content_frame = ttk.Frame(main_frame)
-        content_frame.pack(fill=tk.BOTH, expand=True)
-
-        header_frame = ttk.Frame(content_frame)
-        header_frame.pack(fill=tk.X, pady=(0, 5))
-        ttk.Label(header_frame, text="Файл", font=("Arial", 10, "bold"),
-                  width=25).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(header_frame, text="Статус", font=("Arial", 10, "bold"),
-                  width=20).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Label(header_frame, text="SHA-256 Хеш",
+        content = ttk.Frame(main)
+        content.pack(fill=tk.BOTH, expand=True)
+        header = ttk.Frame(content)
+        header.pack(fill=tk.X, pady=(0, 5))
+        ttk.Label(header, text="Файл", font=("Arial", 10, "bold"), width=25).pack(
+            side=tk.LEFT, padx=(0, 10))
+        ttk.Label(header, text="Статус", font=("Arial", 10, "bold"), width=20).pack(
+            side=tk.LEFT, padx=(0, 10))
+        ttk.Label(header, text="SHA-256 Хеш",
                   font=("Arial", 10, "bold")).pack(side=tk.LEFT)
 
-        for filename, expected_hash in self.expected_hashes.items():
-            file_path = os.path.join(os.environ["WINDIR"], "System32", filename)
-            row_frame = ttk.Frame(content_frame)
-            row_frame.pack(fill=tk.X, pady=2)
-
-            ttk.Label(row_frame, text=filename, font=("Courier New", 9),
-                      width=25, anchor="w").pack(side=tk.LEFT, padx=(0, 10))
-
+        for filename, expected in EXPECTED_HASHES.items():
+            path = os.path.join(SYSTEM32, filename)
+            row = ttk.Frame(content)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text=filename, font=("Courier New", 9), width=25,
+                      anchor="w").pack(side=tk.LEFT, padx=(0, 10))
             try:
-                if os.path.exists(file_path):
-                    with open(file_path, "rb") as f:
-                        file_hash = hashlib.sha256(f.read()).hexdigest().upper()
-                    is_match = file_hash == expected_hash.upper()
-                    ttk.Label(row_frame,
-                              text="✓ Модифицирован" if is_match else "✗ Оригинал",
-                              foreground="green" if is_match else "red",
+                if os.path.exists(path):
+                    h = _sha256_file(path).upper()
+                    match = h == expected.upper()
+                    ttk.Label(row,
+                              text="✓ Модифицирован" if match else "✗ Оригинал",
+                              foreground="green" if match else "red",
                               font=("Arial", 9), width=20, anchor="w").pack(
                         side=tk.LEFT, padx=(0, 10))
-                    ttk.Label(row_frame, text=file_hash, font=("Courier New", 9),
+                    ttk.Label(row, text=h, font=("Courier New", 9),
                               anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
                 else:
-                    ttk.Label(row_frame, text="✗ Не найден", foreground="red",
+                    ttk.Label(row, text="✗ Не найден", foreground="red",
                               font=("Arial", 9), width=20, anchor="w").pack(
                         side=tk.LEFT, padx=(0, 10))
-                    ttk.Label(row_frame, text="Файл не существует",
+                    ttk.Label(row, text="Файл не существует",
                               font=("Courier New", 9), foreground="red",
                               anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
             except Exception as e:
-                ttk.Label(row_frame, text="✗ Ошибка", foreground="red",
+                ttk.Label(row, text="✗ Ошибка", foreground="red",
                           font=("Arial", 9), width=20, anchor="w").pack(
                     side=tk.LEFT, padx=(0, 10))
-                ttk.Label(row_frame, text=f"Ошибка чтения: {str(e)}",
+                ttk.Label(row, text=f"Ошибка чтения: {e}",
                           font=("Courier New", 9), foreground="red",
                           anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
 

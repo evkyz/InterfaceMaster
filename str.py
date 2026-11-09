@@ -1,155 +1,135 @@
+import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
-import subprocess
+
+CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+SHELL_ICONS = r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons'
+NAMING_TEMPLATES = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\NamingTemplates'
+
+
+def _reg(*args):
+    return subprocess.run(['reg', *args], capture_output=True, text=True,
+                          encoding='cp866', creationflags=CREATE_NO_WINDOW)
 
 
 class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-
         self.content_frame = ttk.Frame(self.frame)
         self.content_frame.pack(fill=tk.BOTH, expand=True)
-
         self.arrow_choice = tk.IntVar(value=0)
         self.shortcut_text_choice = tk.IntVar(value=0)
-
-        self.create_widgets()
+        self._create_widgets()
         self.show()
 
-    def create_widgets(self):
+    def _create_widgets(self):
         ttk.Label(self.content_frame, text="Настройка ярлыков Windows",
                   font=('Arial', 16, 'bold'), foreground='#2c3e50').pack(pady=10)
 
-        arrows_frame = ttk.LabelFrame(self.content_frame,
-                                      text="Настройка стрелок ярлыков", padding=15)
-        arrows_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
-
-        ttk.Label(arrows_frame,
+        arrows = ttk.LabelFrame(self.content_frame,
+                                text="Настройка стрелок ярлыков", padding=15)
+        arrows.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        ttk.Label(arrows,
                   text="Выберите тип отображения стрелок на ярлыках Windows",
                   font=('Arial', 10), foreground='#7f8c8d').pack(pady=(0, 10))
+        for text, val in (("Большие стрелки (стандартные)", 1),
+                          ("Маленькие стрелки", 2),
+                          ("Убрать стрелки", 3)):
+            ttk.Radiobutton(arrows, text=text,
+                            variable=self.arrow_choice, value=val).pack(anchor=tk.W, pady=5)
 
-        ttk.Radiobutton(arrows_frame, text="Большие стрелки (стандартные)",
-                        variable=self.arrow_choice, value=1).pack(anchor=tk.W, pady=5)
-        ttk.Radiobutton(arrows_frame, text="Маленькие стрелки",
-                        variable=self.arrow_choice, value=2).pack(anchor=tk.W, pady=5)
-        ttk.Radiobutton(arrows_frame, text="Убрать стрелки",
-                        variable=self.arrow_choice, value=3).pack(anchor=tk.W, pady=5)
-
-        shortcut_frame = ttk.LabelFrame(self.content_frame,
-                                        text="Настройка текста ярлыков", padding=15)
-        shortcut_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
-
-        ttk.Label(shortcut_frame,
+        shortcuts = ttk.LabelFrame(self.content_frame,
+                                   text="Настройка текста ярлыков", padding=15)
+        shortcuts.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+        ttk.Label(shortcuts,
                   text="Настройка отображения текста при создании ярлыков",
                   font=('Arial', 10), foreground='#7f8c8d').pack(pady=(0, 10))
+        for text, val in (("Стандартный текст ' — ярлык'", 1),
+                          ("Убрать текст ' — ярлык'", 2)):
+            ttk.Radiobutton(shortcuts, text=text,
+                            variable=self.shortcut_text_choice, value=val).pack(
+                anchor=tk.W, pady=5)
 
-        ttk.Radiobutton(shortcut_frame, text="Стандартный текст ' — ярлык'",
-                        variable=self.shortcut_text_choice, value=1).pack(anchor=tk.W, pady=5)
-        ttk.Radiobutton(shortcut_frame, text="Убрать текст ' — ярлык'",
-                        variable=self.shortcut_text_choice, value=2).pack(anchor=tk.W, pady=5)
+        btns = ttk.Frame(self.content_frame)
+        btns.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(btns, text="Применить настройки", command=self.apply_changes,
+                   width=25).pack(pady=(0, 10))
+        ttk.Button(btns, text="Перезапустить Проводник",
+                   command=self._restart_explorer, width=25).pack(pady=5)
 
-        button_frame = ttk.Frame(self.content_frame)
-        button_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Button(button_frame, text="Применить настройки",
-                   command=self.apply_changes, width=25).pack(pady=(0, 10))
-        ttk.Button(button_frame, text="Перезапустить Проводник",
-                   command=self.restart_explorer, width=25).pack(pady=5)
-
-        self.status_label = ttk.Label(self.content_frame, text="", font=('Arial', 9),
-                                      foreground='#27ae60', wraplength=400,
-                                      justify=tk.CENTER)
+        self.status_label = ttk.Label(self.content_frame, text="",
+                                      font=('Arial', 9), foreground='#27ae60',
+                                      wraplength=400, justify=tk.CENTER)
         self.status_label.pack(pady=5)
 
-    def _delete_registry_key_if_exists(self, key_path, value_name):
-        try:
-            check_result = subprocess.run(
-                ['reg', 'query', key_path, '/v', value_name],
-                capture_output=True, text=True, encoding='cp866',
-                creationflags=subprocess.CREATE_NO_WINDOW)
-            if check_result.returncode == 0:
-                subprocess.run(
-                    ['reg', 'delete', key_path, '/v', value_name, '/f'],
-                    capture_output=True, text=True, encoding='cp866',
-                    creationflags=subprocess.CREATE_NO_WINDOW, check=True)
-                return True
-        except Exception:
-            pass
-        return False
+    @staticmethod
+    def _delete_value_if_exists(key_path, value_name):
+        r = _reg('query', key_path, '/v', value_name)
+        if r.returncode == 0:
+            _reg('delete', key_path, '/v', value_name, '/f')
 
-    def _set_registry_value(self, key_path, value_name, value_data, value_type='REG_SZ'):
+    @staticmethod
+    def _set_value(key_path, value_name, value_data, value_type='REG_SZ'):
         if value_data == "" and value_type == 'REG_SZ':
-            cmd = ['reg', 'add', key_path, '/v', value_name, '/t', value_type, '/f']
+            _reg('add', key_path, '/v', value_name, '/t', value_type, '/f')
         else:
-            cmd = ['reg', 'add', key_path, '/v', value_name, '/d', value_data,
-                   '/t', value_type, '/f']
-        subprocess.run(cmd, capture_output=True, text=True, encoding='cp866',
-                       creationflags=subprocess.CREATE_NO_WINDOW, check=True)
+            _reg('add', key_path, '/v', value_name, '/d', value_data,
+                 '/t', value_type, '/f')
 
-    def _clear_icon_cache(self):
+    @staticmethod
+    def _clear_icon_cache():
         try:
             subprocess.run(['ie4uinit.exe', '-show'], capture_output=True,
-                           text=True, encoding='cp866',
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-            return True
+                           creationflags=CREATE_NO_WINDOW)
         except Exception:
-            return False
+            pass
 
     def apply_changes(self):
-        arrow_choice = self.arrow_choice.get()
-        text_choice = self.shortcut_text_choice.get()
-
         try:
-            if arrow_choice == 1:
-                self._delete_registry_key_if_exists(
-                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Icons',
-                    '29')
-                self.show_status("✓ Установлены стандартные большие стрелки", False)
-            elif arrow_choice == 2:
-                self._set_registry_value(
-                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Icons',
-                    '29', 'C:\\Windows\\System32\\shell32.dll,-30')
-                self.show_status("✓ Установлены маленькие стрелки", False)
-            elif arrow_choice == 3:
-                self._set_registry_value(
-                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Icons',
-                    '29', '')
-                self.show_status("✓ Стрелки ярлыков удалены", False)
+            arrow = self.arrow_choice.get()
+            text = self.shortcut_text_choice.get()
 
-            if text_choice == 1:
-                self._set_registry_value(
-                    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\NamingTemplates',
-                    'ShortcutNameTemplate', '\\"%s — ярлык.lnk\\"')
-                self.show_status("✓ Текст ' — ярлык' восстановлен", False)
-            elif text_choice == 2:
-                self._set_registry_value(
-                    'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\NamingTemplates',
-                    'ShortcutNameTemplate', '\\"%s.lnk\\"')
-                self.show_status("✓ Текст ' — ярлык' удален", False)
+            if arrow == 1:
+                self._delete_value_if_exists(SHELL_ICONS, '29')
+                self._show_status("✓ Установлены стандартные большие стрелки", False)
+            elif arrow == 2:
+                self._set_value(SHELL_ICONS, '29',
+                                'C:\\Windows\\System32\\shell32.dll,-30')
+                self._show_status("✓ Установлены маленькие стрелки", False)
+            elif arrow == 3:
+                self._set_value(SHELL_ICONS, '29', '')
+                self._show_status("✓ Стрелки ярлыков удалены", False)
+
+            if text == 1:
+                self._set_value(NAMING_TEMPLATES, 'ShortcutNameTemplate',
+                                '\\"%s — ярлык.lnk\\"')
+                self._show_status("✓ Текст ' — ярлык' восстановлен", False)
+            elif text == 2:
+                self._set_value(NAMING_TEMPLATES, 'ShortcutNameTemplate',
+                                '\\"%s.lnk\\"')
+                self._show_status("✓ Текст ' — ярлык' удален", False)
 
             self._clear_icon_cache()
-
-            if arrow_choice > 0 or text_choice > 0:
-                self.show_status("✓ Настройки успешно применены")
+            if arrow > 0 or text > 0:
+                self._show_status("✓ Настройки успешно применены")
         except subprocess.CalledProcessError:
             messagebox.showerror("Ошибка", "Не удалось изменить настройки реестра")
         except Exception as e:
-            messagebox.showerror("Ошибка",
-                                 f"Произошла непредвиденная ошибка: {str(e)}")
+            messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
 
-    def restart_explorer(self):
+    def _restart_explorer(self):
         try:
             subprocess.run(['taskkill', '/f', '/im', 'explorer.exe'],
-                           capture_output=True, text=True, encoding='cp866',
-                           creationflags=subprocess.CREATE_NO_WINDOW)
+                           capture_output=True, creationflags=CREATE_NO_WINDOW)
             subprocess.Popen('explorer.exe', shell=True,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
-            self.show_status("✓ Проводник успешно перезапущен")
+                             creationflags=CREATE_NO_WINDOW)
+            self._show_status("✓ Проводник успешно перезапущен")
         except Exception:
             messagebox.showerror("Ошибка", "Не удалось перезапустить Проводник")
 
-    def show_status(self, message, clear_previous=True):
+    def _show_status(self, message, clear_previous=True):
         if clear_previous:
             self.status_label.config(text=message, foreground='#27ae60')
         else:

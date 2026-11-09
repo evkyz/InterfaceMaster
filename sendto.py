@@ -1,7 +1,30 @@
+import ctypes
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox
-import ctypes
+
+SENDTO_PATH = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'SendTo')
+
+
+def _get_attrs(path):
+    return ctypes.windll.kernel32.GetFileAttributesW(path)
+
+
+def _set_attrs(path, attrs):
+    return ctypes.windll.kernel32.SetFileAttributesW(path, attrs) != 0
+
+
+def set_hidden(path, hidden=True):
+    attrs = _get_attrs(path)
+    if attrs == -1:
+        return False
+    attrs = (attrs | 0x2) if hidden else (attrs & ~0x2)
+    return _set_attrs(path, attrs)
+
+
+def is_hidden(path):
+    attrs = _get_attrs(path)
+    return attrs != -1 and bool(attrs & 0x2)
 
 
 class SendToModule:
@@ -9,184 +32,98 @@ class SendToModule:
         self.parent = parent
         self.create_widgets()
 
-    def set_file_hidden(self, filepath, hidden=True):
-        try:
-            attrs = ctypes.windll.kernel32.GetFileAttributesW(filepath)
-            if attrs == -1:
-                return False
-            if hidden:
-                attrs |= 0x2
-            else:
-                attrs &= ~0x2
-            return ctypes.windll.kernel32.SetFileAttributesW(filepath, attrs) != 0
-        except Exception:
-            return False
-
-    def is_file_hidden(self, filepath):
-        try:
-            attrs = ctypes.windll.kernel32.GetFileAttributesW(filepath)
-            if attrs == -1:
-                return False
-            return bool(attrs & 0x2)
-        except Exception:
-            return False
-
     def create_widgets(self):
         ttk.Label(self.parent, text="Управление пунктами меню 'Отправить'",
                   font=('Arial', 12, 'bold'), foreground='#2c3e50').pack(pady=10)
 
-        control_frame = ttk.Frame(self.parent)
-        control_frame.pack(pady=5)
-        center_container = ttk.Frame(control_frame)
-        center_container.pack(expand=True)
-        buttons_frame = ttk.Frame(center_container)
-        buttons_frame.pack()
+        ctrl = ttk.Frame(self.parent)
+        ctrl.pack(pady=5)
+        buttons = ttk.Frame(ctrl)
+        buttons.pack()
 
-        self.sendto_toggle_all_btn = ttk.Button(
-            buttons_frame, text="", command=self.toggle_all_sendto_items, width=15)
-        self.sendto_toggle_all_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self.toggle_all_btn = ttk.Button(buttons, text="", width=15,
+                                         command=self.toggle_all)
+        self.toggle_all_btn.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.toggle_selected_btn = ttk.Button(
-            buttons_frame, text="Включить",
-            command=self.toggle_selected_sendto_item, width=15)
+        self.toggle_selected_btn = ttk.Button(buttons, text="Включить", width=15,
+                                              command=self.toggle_selected)
         self.toggle_selected_btn.pack(side=tk.LEFT, padx=5, pady=5)
 
-        self.sendto_listbox = tk.Listbox(self.parent, height=15, font=('Arial', 9))
-        self.sendto_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.sendto_listbox.bind('<<ListboxSelect>>', self.on_sendto_selection)
+        self.listbox = tk.Listbox(self.parent, height=15, font=('Arial', 9))
+        self.listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.listbox.bind('<<ListboxSelect>>', self._on_selection)
 
-        self.refresh_sendto_list()
+        self.refresh()
 
-    def toggle_all_sendto_items(self):
+    def _items(self):
+        if not os.path.exists(SENDTO_PATH):
+            return []
+        result = []
+        for name in sorted(os.listdir(SENDTO_PATH)):
+            if name.lower() == "desktop.ini":
+                continue
+            path = os.path.join(SENDTO_PATH, name)
+            if os.path.isfile(path) or os.path.islink(path):
+                result.append((name, path))
+        return result
+
+    def toggle_all(self):
         try:
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft',
-                                       'Windows', 'SendTo')
-            if not os.path.exists(sendto_path):
-                messagebox.showerror("Ошибка", "Папка SendTo не найдена")
+            items = self._items()
+            if not items:
                 return
-
-            items = os.listdir(sendto_path)
-            has_hidden = False
-            has_visible = False
-            for item in items:
-                if item.lower() == "desktop.ini":
-                    continue
-                item_path = os.path.join(sendto_path, item)
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    if self.is_file_hidden(item_path):
-                        has_hidden = True
-                    else:
-                        has_visible = True
-
-            all_hidden = has_hidden and not has_visible
-
-            for item in items:
-                if item.lower() == "desktop.ini":
-                    continue
-                item_path = os.path.join(sendto_path, item)
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    if all_hidden:
-                        if self.is_file_hidden(item_path):
-                            self.set_file_hidden(item_path, False)
-                    else:
-                        if not self.is_file_hidden(item_path):
-                            self.set_file_hidden(item_path, True)
-
-            self.refresh_sendto_list()
+            all_hidden = all(is_hidden(p) for _, p in items)
+            for _, path in items:
+                set_hidden(path, not all_hidden)
+            self.refresh()
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {str(e)}")
+            messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {e}")
 
-    def on_sendto_selection(self, event):
-        selection = self.sendto_listbox.curselection()
-        if selection:
-            item_text = self.sendto_listbox.get(selection[0])
+    def _on_selection(self, event):
+        sel = self.listbox.curselection()
+        if sel:
+            text = self.listbox.get(sel[0])
             self.toggle_selected_btn.config(
-                text="Включить" if "❌" in item_text else "Отключить")
+                text="Включить" if "❌" in text else "Отключить")
 
-    def toggle_selected_sendto_item(self):
+    def toggle_selected(self):
         try:
-            selection = self.sendto_listbox.curselection()
-            if not selection:
+            sel = self.listbox.curselection()
+            if not sel:
                 messagebox.showinfo("Информация", "Выберите пункт из списка")
                 return
-
-            item_text = self.sendto_listbox.get(selection[0])
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft',
-                                       'Windows', 'SendTo')
-
-            if "❌" in item_text:
-                original_name = item_text[2:].replace(" (отключен)", "")
-                item_path = os.path.join(sendto_path, original_name)
-                if not os.path.exists(item_path):
-                    messagebox.showinfo("Информация",
-                                        f"Пункт '{original_name}' не найден")
-                    return
-                if not self.is_file_hidden(item_path):
-                    messagebox.showinfo("Информация",
-                                        f"Пункт '{original_name}' уже видим")
-                    return
-                if not self.set_file_hidden(item_path, False):
-                    messagebox.showerror("Ошибка",
-                                         f"Не удалось сделать видимым пункт '{original_name}'")
-                    return
-                self.refresh_sendto_list()
-            else:
-                original_name = item_text[2:] if "✅" in item_text else item_text
-                item_path = os.path.join(sendto_path, original_name)
-                if not os.path.exists(item_path):
-                    messagebox.showinfo("Информация",
-                                        f"Пункт '{original_name}' не найден")
-                    return
-                if self.is_file_hidden(item_path):
-                    messagebox.showinfo("Информация",
-                                        f"Пункт '{original_name}' уже скрыт")
-                    return
-                if not self.set_file_hidden(item_path, True):
-                    messagebox.showerror("Ошибка",
-                                         f"Не удалось скрыть пункт '{original_name}'")
-                    return
-                self.refresh_sendto_list()
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при переключении пункта: {str(e)}")
-
-    def refresh_sendto_list(self):
-        try:
-            self.sendto_listbox.delete(0, tk.END)
-            sendto_path = os.path.join(os.environ['APPDATA'], 'Microsoft',
-                                       'Windows', 'SendTo')
-            if not os.path.exists(sendto_path):
-                self.sendto_listbox.insert(0, "Папка SendTo не найдена")
+            text = self.listbox.get(sel[0])
+            hidden = "❌" in text
+            name = text[2:].replace(" (отключен)", "")
+            path = os.path.join(SENDTO_PATH, name)
+            if not os.path.exists(path):
+                messagebox.showinfo("Информация", f"Пункт '{name}' не найден")
                 return
-
-            items = os.listdir(sendto_path)
-            if not items:
-                self.sendto_listbox.insert(0, "Папка SendTo пуста")
+            if not set_hidden(path, not hidden):
+                messagebox.showerror("Ошибка",
+                                     f"Не удалось изменить '{name}'")
                 return
-
-            has_hidden = False
-            has_visible = False
-            display_items = []
-
-            for item in sorted(items):
-                if item.lower() == "desktop.ini":
-                    continue
-                item_path = os.path.join(sendto_path, item)
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    if self.is_file_hidden(item_path):
-                        display_items.append(f"❌ {item} (отключен)")
-                        has_hidden = True
-                    else:
-                        display_items.append(f"✅ {item}")
-                        has_visible = True
-
-            if has_visible and not has_hidden:
-                self.sendto_toggle_all_btn.config(text="Отключить всё")
-            elif has_hidden and not has_visible:
-                self.sendto_toggle_all_btn.config(text="Включить всё")
-            else:
-                self.sendto_toggle_all_btn.config(text="Отключить всё")
-
-            for text in display_items:
-                self.sendto_listbox.insert(tk.END, text)
+            self.refresh()
         except Exception as e:
-            self.sendto_listbox.insert(0, f"Ошибка: {e}")
+            messagebox.showerror("Ошибка", f"Ошибка при переключении: {e}")
+
+    def refresh(self):
+        self.listbox.delete(0, tk.END)
+        if not os.path.exists(SENDTO_PATH):
+            self.listbox.insert(0, "Папка SendTo не найдена")
+            return
+        items = self._items()
+        if not items:
+            self.listbox.insert(0, "Папка SendTo пуста")
+            return
+
+        visible_count = 0
+        for name, path in items:
+            if is_hidden(path):
+                self.listbox.insert(tk.END, f"❌ {name} (отключен)")
+            else:
+                self.listbox.insert(tk.END, f"✅ {name}")
+                visible_count += 1
+
+        all_hidden = visible_count == 0
+        self.toggle_all_btn.config(text="Включить всё" if all_hidden else "Отключить всё")

@@ -21,6 +21,7 @@ class Module:
         self.content_frame.pack(fill=tk.BOTH, expand=True)
         self.arrow_choice = tk.IntVar(value=0)
         self.shortcut_text_choice = tk.IntVar(value=0)
+        self._status_timer = None
         self._create_widgets()
         self.show()
 
@@ -130,6 +131,11 @@ class Module:
             messagebox.showerror("Ошибка", "Не удалось перезапустить Проводник")
 
     def _show_status(self, message, clear_previous=True):
+        if self._status_timer:
+            try:
+                self.frame.after_cancel(self._status_timer)
+            except Exception:
+                pass
         if clear_previous:
             self.status_label.config(text=message, foreground='#27ae60')
         else:
@@ -137,7 +143,8 @@ class Module:
             self.status_label.config(
                 text=f"{current}\n{message}" if current else message,
                 foreground='#27ae60')
-        self.frame.after(5000, lambda: self.status_label.config(text=""))
+        self._status_timer = self.frame.after(
+            5000, lambda: self.status_label.config(text=""))
 
     def show(self):
         self.frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)

@@ -123,21 +123,30 @@ class ExplorerModule:
         return False
 
     def _add_tooltip(self, widget, text):
-        tip = tk.Toplevel(widget)
-        tip.wm_overrideredirect(True)
-        tip.wm_geometry("+0+0")
-        tip.withdraw()
-        tk.Label(tip, text=text, background="#ffffe0", relief="solid",
-                 borderwidth=1, font=("Arial", 9)).pack()
+        state = {'tip': None}
 
         def enter(event):
-            x = widget.winfo_rootx() + 20
-            y = widget.winfo_rooty() + widget.winfo_height() + 5
-            tip.wm_geometry(f"+{x}+{y}")
-            tip.deiconify()
+            if state['tip']:
+                return
+            try:
+                x = widget.winfo_rootx() + 20
+                y = widget.winfo_rooty() + widget.winfo_height() + 5
+                tip = tk.Toplevel(widget)
+                tip.wm_overrideredirect(True)
+                tip.wm_geometry(f"+{x}+{y}")
+                tk.Label(tip, text=text, background="#ffffe0", relief="solid",
+                         borderwidth=1, font=("Arial", 9)).pack()
+                state['tip'] = tip
+            except Exception:
+                state['tip'] = None
 
         def leave(event):
-            tip.withdraw()
+            if state['tip']:
+                try:
+                    state['tip'].destroy()
+                except Exception:
+                    pass
+                state['tip'] = None
 
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)

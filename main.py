@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import os
 import platform
 import shutil
@@ -125,6 +126,7 @@ class DLLChecker:
             'system32_hash_match': sys32_match,
             'recommended_path': recommended,
             'should_offer_copy': (info['dll_found'] and info['hash_match']
+                                  and not saved_valid
                                   and (not sys32_exists or not sys32_match)),
             'is_in_system32': sys32_exists and sys32_match,
             'saved_path': saved,
@@ -164,12 +166,13 @@ class DLLChecker:
     @staticmethod
     def get_dll_path_for_module(parent, module_name):
         status = DLLChecker.get_dll_status()
+        show_warn = parent and module_name in ("desktop", "disk")
         if not status['dll_found']:
-            if parent and module_name in ("desktop", "disk"):
+            if show_warn:
                 messagebox.showwarning("Внимание", "Файл imaster.dll не найден!")
             return None
         if not status['hash_match']:
-            if parent and module_name in ("desktop", "disk"):
+            if show_warn:
                 messagebox.showwarning("Внимание", "Файл imaster.dll поврежден!")
             return None
         if module_name in ("desktop", "disk"):
@@ -185,8 +188,6 @@ class DLLChecker:
 
 
 class DLLCheckerInternal:
-    VALID_HASHES = VALID_HASHES
-
     def __init__(self, base_path):
         self.base_path = base_path
 
@@ -206,17 +207,17 @@ class DLLCheckerInternal:
         for path, _ in locations:
             if os.path.exists(path):
                 h = calculate_sha1(path)
-                if h and h in self.VALID_HASHES:
+                if h and h in VALID_HASHES:
                     return path
         return None
 
     def verify_dll_hash(self, path):
         actual = calculate_sha1(path)
         return {
-            'valid_hashes': self.VALID_HASHES,
+            'valid_hashes': VALID_HASHES,
             'actual_hash': actual,
             'dll_path': path,
-            'hash_match': actual in self.VALID_HASHES if actual else False,
+            'hash_match': actual in VALID_HASHES if actual else False,
             'dll_found': True,
         }
 
@@ -230,7 +231,7 @@ class DLLCheckerInternal:
         if found:
             return self.verify_dll_hash(found)
         return {
-            'valid_hashes': self.VALID_HASHES,
+            'valid_hashes': VALID_HASHES,
             'actual_hash': None,
             'dll_path': None,
             'hash_match': False,
@@ -241,7 +242,7 @@ class DLLCheckerInternal:
 class InterfaceMaster:
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v2.1 Beta")
+        self.root.title("Interface Master v2.1")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -261,7 +262,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "2.1.3.185 Beta"
+        self.version = "2.1.5.200"
         self.logo_photo = None
         self.modules_loaded = self._load_modules()
         self.current_module_instance = None
@@ -286,7 +287,6 @@ class InterfaceMaster:
         for name in names:
             try:
                 if getattr(sys, 'frozen', False):
-                    import importlib.util
                     path = os.path.join(self.base_path, f"{name}.py")
                     if os.path.exists(path):
                         spec = importlib.util.spec_from_file_location(f"imod_{name}", path)
@@ -349,7 +349,6 @@ class InterfaceMaster:
         ttk.Button(content, text="?", style='Help.TButton',
                    command=self._open_about).grid(row=0, column=2, sticky="e", padx=(10, 0))
         content.grid_columnconfigure(0, weight=1)
-        content.grid_columnconfigure(1, weight=0)
         content.grid_columnconfigure(2, weight=1)
 
     def _create_menu(self):
@@ -408,7 +407,7 @@ class InterfaceMaster:
                 if not cls:
                     ttk.Label(self.module_frame,
                               text=f"Модуль {module_name} не имеет правильной структуры",
-                              foreground='red').pack(expand=True)
+                              foreground="red").pack(expand=True)
                     return
                 if module_name in ("desktop", "disk"):
                     self.current_module_instance = cls(
@@ -418,7 +417,7 @@ class InterfaceMaster:
         except Exception:
             ttk.Label(self.module_frame,
                       text=f"Ошибка загрузки модуля {module_name}",
-                      foreground='red').pack(expand=True)
+                      foreground="red").pack(expand=True)
 
     def _back_to_menu(self):
         self.module_frame.pack_forget()

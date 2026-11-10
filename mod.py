@@ -145,10 +145,9 @@ class Module:
                     self.system_file_status[filename] = {
                         'exists': False, 'matches_expected': False, 'hash': None}
                     status.config(text="✗ Отсутствует", foreground="red")
-            except Exception as e:
+            except Exception:
                 self.system_file_status[filename] = {
-                    'exists': False, 'matches_expected': False, 'hash': None,
-                    'error': str(e)}
+                    'exists': False, 'matches_expected': False, 'hash': None}
                 status.config(text="✗ Ошибка", foreground="red")
 
     def _update_buttons_state(self):

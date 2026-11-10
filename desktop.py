@@ -61,6 +61,9 @@ CONTROL_PANEL_DEFAULTS = {
     "{21EC2020-3AEA-1069-A2DD-08002B30309D}": r"C:\Windows\System32\imageres.dll,-21",
 }
 
+LIBRARIES_DEFAULT = r"C:\Windows\System32\imageres.dll,-1023"
+LIBRARIES_CLSID = r"{031E4825-7B94-4dc3-B131-E946B44C8DD5}"
+
 
 class Module:
     def __init__(self, parent, module_name=None):
@@ -71,8 +74,6 @@ class Module:
         self.dll_path = self._get_dll_path()
         self.message_timer = None
         self._is_destroyed = False
-        self.tooltip_window = None
-
         self._init_registry_paths()
         self._init_icon_sets()
         self._init_custom_vars()
@@ -147,7 +148,7 @@ class Module:
             "network": r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}\DefaultIcon",
             "recycle_bin_empty": r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon",
             "recycle_bin_full": r"Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon",
-            "libraries": r"CLSID\{031E4825-7B94-4dc3-B131-E946B44C8DD5}\DefaultIcon",
+            "libraries": rf"CLSID\{LIBRARIES_CLSID}\DefaultIcon",
         }
 
     def _init_icon_sets(self):
@@ -390,41 +391,51 @@ class Module:
             self._remove_tooltip(self.checkbox)
 
     def _create_tooltip(self, widget, text):
+        self._remove_tooltip(widget)
+        state = {'tip': None}
+
         def enter(event):
-            if self._is_destroyed:
+            if self._is_destroyed or state['tip']:
                 return
             try:
                 x = widget.winfo_rootx() + 25
                 y = widget.winfo_rooty() + 25
-                self.tooltip_window = tk.Toplevel(widget)
-                self.tooltip_window.wm_overrideredirect(True)
-                self.tooltip_window.wm_geometry(f"+{x}+{y}")
-                tk.Label(self.tooltip_window, text=text, background="lightyellow",
+                tip = tk.Toplevel(widget)
+                tip.wm_overrideredirect(True)
+                tip.wm_geometry(f"+{x}+{y}")
+                tk.Label(tip, text=text, background="lightyellow",
                          relief="solid", borderwidth=1, font=("Arial", 8),
                          padx=5, pady=2).pack()
+                state['tip'] = tip
             except Exception:
-                pass
+                state['tip'] = None
 
         def leave(event):
-            if self.tooltip_window:
+            if state['tip']:
                 try:
-                    self.tooltip_window.destroy()
+                    state['tip'].destroy()
                 except Exception:
                     pass
-                self.tooltip_window = None
+                state['tip'] = None
 
+        widget._tooltip_state = state
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
     def _remove_tooltip(self, widget):
-        widget.unbind("<Enter>")
-        widget.unbind("<Leave>")
-        if self.tooltip_window:
+        state = getattr(widget, '_tooltip_state', None)
+        if state and state.get('tip'):
             try:
-                self.tooltip_window.destroy()
+                state['tip'].destroy()
             except Exception:
                 pass
-            self.tooltip_window = None
+            state['tip'] = None
+        try:
+            widget.unbind("<Enter>")
+            widget.unbind("<Leave>")
+        except Exception:
+            pass
+        widget._tooltip_state = None
 
     # ---- cache / icons ----
     def _refresh_icon_cache(self):
@@ -453,20 +464,45 @@ class Module:
         except Exception as e:
             self.show_message(f"Ошибка при очистке кэша: {e}", "warning", target)
 
-    def _set_icon(self, reg_path, icon_value, param_name="",
-                  use_classes_root=False, is_reset=False):
+    # ---- icon write helpers ----
+
+    def _write_icon_value(self, hive, path, param_name, value):
+        """Записать значение иконки в указанный hive/path. Возвращает True/False."""
         try:
-            hive = winreg.HKEY_CLASSES_ROOT if use_classes_root else winreg.HKEY_CURRENT_USER
             try:
-                key = winreg.OpenKey(hive, reg_path, 0, winreg.KEY_WRITE)
+                key = winreg.OpenKey(hive, path, 0, winreg.KEY_WRITE)
             except FileNotFoundError:
-                key = winreg.CreateKey(hive, reg_path)
-            value = icon_value if is_reset else f"{self.dll_path},{icon_value}"
+                key = winreg.CreateKey(hive, path)
             winreg.SetValueEx(key, param_name, 0, winreg.REG_SZ, value)
             winreg.CloseKey(key)
             return True
+        except (PermissionError, OSError):
+            return False
         except Exception:
             return False
+
+    def _set_icon(self, reg_path, icon_value, param_name="",
+                  use_classes_root=False, is_reset=False):
+        """Установка иконки.
+
+        Для use_classes_root=True перебираем HKLM\\SOFTWARE\\Classes →
+        HKCU\\Software\\Classes → HKCR. HKCR — виртуальный hive.
+        """
+        value = icon_value if is_reset else f"{self.dll_path},{icon_value}"
+
+        if use_classes_root:
+            candidates = [
+                (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\Classes\\" + reg_path),
+                (winreg.HKEY_CURRENT_USER, "Software\\Classes\\" + reg_path),
+                (winreg.HKEY_CLASSES_ROOT, reg_path),
+            ]
+        else:
+            candidates = [(winreg.HKEY_CURRENT_USER, reg_path)]
+
+        for hive, path in candidates:
+            if self._write_icon_value(hive, path, param_name, value):
+                return True
+        return False
 
     def _set_control_panel_icons(self, icon_value, is_reset=False):
         count = 0
@@ -476,27 +512,31 @@ class Module:
         ]
         for reg_path in paths:
             try:
+                current_value = icon_value
                 if is_reset:
                     for clsid, default_value in CONTROL_PANEL_DEFAULTS.items():
                         if clsid in reg_path:
-                            icon_value = default_value
+                            current_value = default_value
                             break
-                self._set_icon(reg_path, icon_value, is_reset=is_reset)
+                self._set_icon(reg_path, current_value, is_reset=is_reset)
                 count += 1
             except Exception:
                 continue
         return count
 
     def _reset_libraries_icon(self):
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, self.REG_PATHS["libraries"], 0,
-                                 winreg.KEY_WRITE)
-            winreg.SetValueEx(key, "", 0, winreg.REG_SZ,
-                              r"C:\Windows\System32\imageres.dll,-1023")
-            winreg.CloseKey(key)
-            return True
-        except Exception:
-            return False
+        """Сброс иконки библиотек. HKCR виртуальный — пишем явно в HKLM → HKCU → HKCR."""
+        for hive, path in (
+            (winreg.HKEY_LOCAL_MACHINE,
+             "SOFTWARE\\Classes\\CLSID\\" + LIBRARIES_CLSID + "\\DefaultIcon"),
+            (winreg.HKEY_CURRENT_USER,
+             "Software\\Classes\\CLSID\\" + LIBRARIES_CLSID + "\\DefaultIcon"),
+            (winreg.HKEY_CLASSES_ROOT,
+             "CLSID\\" + LIBRARIES_CLSID + "\\DefaultIcon"),
+        ):
+            if self._write_icon_value(hive, path, "", LIBRARIES_DEFAULT):
+                return True
+        return False
 
     def apply_icon_set(self):
         if self._is_destroyed or not self.dll_path:

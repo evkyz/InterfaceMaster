@@ -13,113 +13,144 @@ def _run(args, **kwargs):
     return subprocess.run(args, **kwargs)
 
 
+# ---------- Модульные проверки версии/редакции (без UI) ----------
+
+def get_windows_version():
+    """Возвращает полную версию Windows в формате major.minor.build.revision."""
+    try:
+        r = _run(['wmic', 'os', 'get', 'Version', '/value'],
+                 capture_output=True, text=True, encoding='cp866')
+        m = re.search(r'Version=(\d+\.\d+\.\d+\.\d+)', r.stdout)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    try:
+        r = _run(['reg', 'query',
+                  'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
+                  '/v', 'CurrentBuildNumber'],
+                 capture_output=True, text=True, encoding='cp866')
+        m = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', r.stdout)
+        if m:
+            build = m.group(1)
+            rev = 0
+            try:
+                r2 = _run(['reg', 'query',
+                           'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
+                           '/v', 'UBR'],
+                          capture_output=True, text=True, encoding='cp866')
+                ubr = re.search(r'UBR\s+REG_DWORD\s+0x([0-9a-fA-F]+)', r2.stdout)
+                if ubr:
+                    rev = int(ubr.group(1), 16)
+            except Exception:
+                pass
+            return f"10.0.{build}.{rev}"
+    except Exception:
+        pass
+    return "10.0.0.0"
+
+
+def get_build_number(version=None):
+    if version is None:
+        version = get_windows_version()
+    try:
+        return int(version.split('.')[2])
+    except Exception:
+        return 0
+
+
+def get_revision_number(version=None):
+    if version is None:
+        version = get_windows_version()
+    try:
+        parts = version.split('.')
+        return int(parts[3]) if len(parts) > 3 else 0
+    except Exception:
+        return 0
+
+
+def get_edition_id():
+    """Возвращает EditionID из реестра (Enterprise, EnterpriseS, Professional и т.д.)."""
+    try:
+        r = _run(['reg', 'query',
+                  'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
+                  '/v', 'EditionID'],
+                 capture_output=True, text=True, encoding='cp866')
+        m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
+        return m.group(1) if m else ''
+    except Exception:
+        return ''
+
+
+def is_enterprise():
+    """Корпоративные редакции: Enterprise или EnterpriseS (LTSC)."""
+    return get_edition_id() in ('Enterprise', 'EnterpriseS')
+
+
+def is_corporate_edition():
+    """Для тултипов: Enterprise или EnterpriseS."""
+    return is_enterprise()
+
+
+def is_windows_version_supported():
+    """Meet Now: 2004 (>=19041.610), 20H2 (>=19042.610), 21H2+ (>=19044).
+
+    Не поддерживается в корпоративных редакциях (Enterprise, EnterpriseS).
+    """
+    if is_corporate_edition():
+        return False
+    build = get_build_number()
+    rev = get_revision_number()
+    if build == 19041:
+        return rev >= 610
+    if build == 19042:
+        return rev >= 610
+    return build >= 19044
+
+
+def is_people_bar_supported():
+    """Кнопка 'Люди' доступна в Windows 10 1709, 1803, 1809, 1903.
+
+    Сквозная проверка по диапазону build:
+    16299 (1709) <= build < 18363 (1909).
+    Покрывает все накопительные обновления внутри каждой версии.
+    В корпоративных редакциях (Enterprise, EnterpriseS) кнопка недоступна.
+    """
+    if is_corporate_edition():
+        return False
+    build = get_build_number()
+    return 16299 <= build < 18363
+
+
 class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-        self.windows_version = self._get_windows_version()
+        self.windows_version = get_windows_version()
         self._create_widgets()
         self.show()
 
-    @staticmethod
-    def _get_windows_version():
-        """Возвращает полную версию Windows в формате major.minor.build.revision."""
-        try:
-            r = _run(['wmic', 'os', 'get', 'Version', '/value'],
-                     capture_output=True, text=True, encoding='cp866')
-            m = re.search(r'Version=(\d+\.\d+\.\d+\.\d+)', r.stdout)
-            if m:
-                return m.group(1)
-        except Exception:
-            pass
-        try:
-            r = _run(['reg', 'query',
-                      'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                      '/v', 'CurrentBuildNumber'],
-                     capture_output=True, text=True, encoding='cp866')
-            m = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', r.stdout)
-            if m:
-                build = m.group(1)
-                rev = 0
-                try:
-                    r2 = _run(['reg', 'query',
-                               'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                               '/v', 'UBR'],
-                              capture_output=True, text=True, encoding='cp866')
-                    ubr = re.search(r'UBR\s+REG_DWORD\s+0x([0-9a-fA-F]+)', r2.stdout)
-                    if ubr:
-                        rev = int(ubr.group(1), 16)
-                except Exception:
-                    pass
-                return f"10.0.{build}.{rev}"
-        except Exception:
-            pass
-        return "10.0.0.0"
-
+    # ---- тонкие обёртки для обратной совместимости ----
     def _get_build_number(self):
-        try:
-            return int(self.windows_version.split('.')[2])
-        except Exception:
-            return 0
+        return get_build_number(self.windows_version)
 
     def _get_revision_number(self):
-        try:
-            parts = self.windows_version.split('.')
-            return int(parts[3]) if len(parts) > 3 else 0
-        except Exception:
-            return 0
+        return get_revision_number(self.windows_version)
 
     def _get_edition_id(self):
-        """Возвращает EditionID из реестра (Enterprise, EnterpriseS, Professional и т.д.)."""
-        try:
-            r = _run(['reg', 'query',
-                      'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                      '/v', 'EditionID'],
-                     capture_output=True, text=True, encoding='cp866')
-            m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
-            return m.group(1) if m else ''
-        except Exception:
-            return ''
-
-    def is_ltsc(self):
-        """LTSC/LTSB редакции имеют EditionID = EnterpriseS."""
-        return self._get_edition_id() == 'EnterpriseS'
+        return get_edition_id()
 
     def is_enterprise(self):
-        """Корпоративные редакции: Enterprise или EnterpriseS (LTSC)."""
-        return self._get_edition_id() in ('Enterprise', 'EnterpriseS')
+        return is_enterprise()
 
     def is_corporate_edition(self):
-        """Для тултипов: Enterprise или EnterpriseS."""
-        return self.is_enterprise()
+        return is_corporate_edition()
 
     def is_windows_version_supported(self):
-        """Meet Now: 2004 (>=19041.610), 20H2 (>=19042.610), 21H2+ (>=19044).
-
-        Не поддерживается в корпоративных редакциях (Enterprise, EnterpriseS).
-        """
-        if self.is_corporate_edition():
-            return False
-        build = self._get_build_number()
-        rev = self._get_revision_number()
-        if build == 19041:
-            return rev >= 610
-        if build == 19042:
-            return rev >= 610
-        return build >= 19044
+        return is_windows_version_supported()
 
     def is_people_bar_supported(self):
-        """Кнопка 'Люди' доступна в Windows 10 1709, 1803, 1809, 1903.
-
-        Сквозная проверка по диапазону build:
-        16299 (1709) <= build < 18363 (1909).
-        Покрывает все накопительные обновления внутри каждой версии.
-        В корпоративных редакциях (Enterprise, EnterpriseS) кнопка недоступна.
-        """
-        if self.is_corporate_edition():
-            return False
-        build = self._get_build_number()
-        return 16299 <= build < 18363
+        return is_people_bar_supported()
 
     def _tooltip(self, widget, text):
         def enter(event):

@@ -7,16 +7,6 @@ HKCR = winreg.HKEY_CLASSES_ROOT
 HKLM = winreg.HKEY_LOCAL_MACHINE
 HKCU = winreg.HKEY_CURRENT_USER
 
-_HIVE_MAP = {
-    'HKLM': winreg.HKEY_LOCAL_MACHINE,
-    'HKCU': winreg.HKEY_CURRENT_USER,
-    'HKCR': winreg.HKEY_CLASSES_ROOT,
-}
-
-
-def _hive(name):
-    return _HIVE_MAP[name]
-
 
 def _reg_exists(hive, path):
     try:
@@ -82,8 +72,7 @@ def _ensure_shellnew(hive, base_path):
 FILE_NAMES = {
     '.folder': 'Папка', '.bmp': 'Рисунок BMP', '.contact': 'Контакт',
     '.lnk': 'Ярлык', '.rtf': 'Документ RTF', '.txt': 'Текстовый документ',
-    '.zip': 'Архив ZIP', '.docx': 'Документ Word', '.xlsx': 'Книга Excel',
-    '.pptx': 'Презентация PowerPoint', '.pub': 'Публикация Publisher',
+    '.zip': 'Архив ZIP',
 }
 
 TARGET_EXTENSIONS = {
@@ -94,13 +83,6 @@ TARGET_EXTENSIONS = {
     '.txt': r'SOFTWARE\Classes\.txt\ShellNew',
     '.zip': r'SOFTWARE\Classes\.zip\CompressedFolder\ShellNew',
 }
-
-OFFICE_DEFS = [
-    ('.docx', "Документ Word", "Word.Document"),
-    ('.xlsx', "Книга Excel", "Excel.Sheet"),
-    ('.pptx', "Презентация PowerPoint", "PowerPoint.Show"),
-    ('.pub', "Публикация Publisher", "Publisher.Document"),
-]
 
 # ---------- Работа с MS-расширениями и офисными клиентами ----------
 
@@ -192,16 +174,6 @@ def _classify_provider(class_name, ext):
     return (pid, f"{MS_EXTENSIONS[ext]} (другое)", 'other')
 
 
-def detect_office():
-    for ext in MS_EXTENSIONS:
-        if not _ext_registered(ext):
-            continue
-        for hive in (HKLM, HKCU):
-            if _find_shellnew_under_ext(hive, ext):
-                return True
-    return False
-
-
 class CreateNewModule:
     def __init__(self, parent):
         self.parent = parent
@@ -288,25 +260,25 @@ class CreateNewModule:
         try:
             # Folder
             if _reg_exists(HKCR, r'Folder\ShellNew'):
-                items.append({"ext": '.folder', "name": "Папка", "enabled": True,
+                items.append({"name": "Папка", "enabled": True,
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
             elif _reg_exists(HKCR, r'Folder\ShellNew_no'):
-                items.append({"ext": '.folder', "name": "Папка", "enabled": False,
+                items.append({"name": "Папка", "enabled": False,
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
             else:
-                items.append({"ext": '.folder', "name": "Папка", "enabled": False,
+                items.append({"name": "Папка", "enabled": False,
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
 
             for ext, path in TARGET_EXTENSIONS.items():
                 name = FILE_NAMES.get(ext, f"Файл {ext.lstrip('.')}")
                 if _reg_exists(HKLM, path):
-                    items.append({"ext": ext, "name": name, "enabled": True,
+                    items.append({"name": name, "enabled": True,
                                   "hive": HKLM, "base_path": path})
                 elif _reg_exists(HKLM, path + '_no'):
-                    items.append({"ext": ext, "name": name, "enabled": False,
+                    items.append({"name": name, "enabled": False,
                                   "hive": HKLM, "base_path": path})
                 else:
-                    items.append({"ext": ext, "name": name, "enabled": False,
+                    items.append({"name": name, "enabled": False,
                                   "hive": HKLM, "base_path": path})
 
             items.extend(self._get_office_items())
@@ -329,17 +301,14 @@ class CreateNewModule:
                 continue
             for hive in (HKLM, HKCU):
                 for h, path, cls, enabled in _find_shellnew_under_ext(hive, ext):
-                    pid, display, vendor = _classify_provider(cls, ext)
+                    pid, display, _vendor = _classify_provider(cls, ext)
                     key = (pid, ext)
                     if key in seen:
                         continue
                     seen.add(key)
                     items.append({
-                        "ext": ext,
                         "name": display,
-                        "vendor": vendor,
                         "provider_id": pid,
-                        "class_name": cls,
                         "enabled": enabled,
                         "hive": h,
                         "shellnew": (h, path),

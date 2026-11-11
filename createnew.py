@@ -1,4 +1,5 @@
 import os
+import platform
 import tkinter as tk
 import winreg
 from tkinter import ttk, messagebox
@@ -69,6 +70,34 @@ def _ensure_shellnew(hive, base_path):
         winreg.SetValueEx(k, "NullFile", 0, winreg.REG_SZ, "")
 
 
+# ---------- Проверка версии Windows ----------
+
+_WIN_BUILD_CACHE = None
+
+
+def _get_windows_build():
+    """Возвращает build-номер Windows (например, 19045). 0 при ошибке."""
+    try:
+        parts = platform.version().split('.')
+        if len(parts) >= 3:
+            return int(parts[2])
+    except Exception:
+        pass
+    return 0
+
+
+def _win_build():
+    global _WIN_BUILD_CACHE
+    if _WIN_BUILD_CACHE is None:
+        _WIN_BUILD_CACHE = _get_windows_build()
+    return _WIN_BUILD_CACHE
+
+
+def _is_windows_1903_or_later():
+    """True для Windows 10 1903 (build 18362) и новее (включая Windows 11)."""
+    return _win_build() >= 18362
+
+
 FILE_NAMES = {
     '.folder': 'Папка', '.bmp': 'Рисунок BMP', '.contact': 'Контакт',
     '.lnk': 'Ярлык', '.rtf': 'Документ RTF', '.txt': 'Текстовый документ',
@@ -83,6 +112,11 @@ TARGET_EXTENSIONS = {
     '.txt': r'SOFTWARE\Classes\.txt\ShellNew',
     '.zip': r'SOFTWARE\Classes\.zip\CompressedFolder\ShellNew',
 }
+
+# Расширения, которые скрываются полностью на Windows 10 1903+ (build >= 18362).
+# В реестре они могут присутствовать, но Microsoft перестала показывать их
+# в контекстном меню «Создать» начиная с этих версий.
+HIDDEN_SINCE_1903 = {'.contact'}
 
 # ---------- Работа с MS-расширениями и офисными клиентами ----------
 
@@ -258,6 +292,8 @@ class CreateNewModule:
     def _get_items(self):
         items = []
         try:
+            hidden_1903 = _is_windows_1903_or_later()
+
             # Folder
             if _reg_exists(HKCR, r'Folder\ShellNew'):
                 items.append({"name": "Папка", "enabled": True,
@@ -270,6 +306,10 @@ class CreateNewModule:
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
 
             for ext, path in TARGET_EXTENSIONS.items():
+                # Пропускаем пункты, скрытые на 1903+
+                if hidden_1903 and ext in HIDDEN_SINCE_1903:
+                    continue
+
                 name = FILE_NAMES.get(ext, f"Файл {ext.lstrip('.')}")
                 if _reg_exists(HKLM, path):
                     items.append({"name": name, "enabled": True,

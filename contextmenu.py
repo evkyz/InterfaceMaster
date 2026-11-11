@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tkinter as tk
 import winreg
@@ -29,29 +30,6 @@ PAINT3D_EXTS = ('bmp', 'fbx', 'gif', 'glb', 'jfif', 'jpe', 'jpeg', 'jpg',
 WALLPAPER_EXTS = ('bmp', 'dib', 'gif', 'jfif', 'jpe', 'jpeg', 'jpg',
                   'png', 'tif', 'tiff', 'wdp', 'heic', 'heif', 'avif')
 
-# Классы файлов, у которых есть подменю "Печать"
-PRINT_CLASSES = (
-    'SystemFileAssociations\\image',
-    'batfile',
-    'cmdfile',
-    'docxfile',
-    'fonfile',
-    'htmlfile',
-    'inffile',
-    'inifile',
-    'JSEFile',
-    'otffile',
-    'pfmfile',
-    'regfile',
-    'rtffile',
-    'ttcfile',
-    'ttffile',
-    'txtfile',
-    'VBEFile',
-    'VBSFile',
-    'WSFFile',
-)
-
 # Базовые классы для пункта «Открыть окно PowerShell здесь»
 POWERSHELL_CLASSES = (
     'Directory',
@@ -59,9 +37,70 @@ POWERSHELL_CLASSES = (
     'Drive',
 )
 
+# AppX-пакет «Фотографии» (Photos) — ShellEdit и ShellCreateVideo
+PHOTOS_APPX_CLSID = r'AppX43hnxtbyyps62jhe9sqpdzxn1790zetc'
+PHOTOS_SHELL_EDIT = rf'{PHOTOS_APPX_CLSID}\Shell\ShellEdit'
+PHOTOS_SHELL_CREATE_VIDEO = rf'{PHOTOS_APPX_CLSID}\Shell\ShellCreateVideo'
+
+# Стандартные базовые пути с shell\print — их проверяем «дёшево», без сканирования.
+DEFAULT_PRINT_BASES = (
+    r"SystemFileAssociations\image",
+    r"SystemFileAssociations\text",
+    r"SystemFileAssociations\.pdf",
+    r"SystemFileAssociations\.bmp",
+    r"SystemFileAssociations\.jpg",
+    r"SystemFileAssociations\.jpeg",
+    r"SystemFileAssociations\.png",
+    r"SystemFileAssociations\.gif",
+    r"SystemFileAssociations\.tif",
+    r"SystemFileAssociations\.tiff",
+    r"SystemFileAssociations\.wdp",
+    r"SystemFileAssociations\.txt",
+    r"SystemFileAssociations\.rtf",
+    r"SystemFileAssociations\.docx",
+    r"SystemFileAssociations\.xlsx",
+    r"SystemFileAssociations\.pptx",
+    r"Word.Document.12",
+    r"Word.Document.8",
+    r"Word.RTF.8",
+    r"Excel.Sheet.12",
+    r"Excel.Sheet.8",
+    r"PowerPoint.Show.12",
+    r"PowerPoint.Show.8",
+    r"AcroExch.Document.7",
+    r"AcroExch.Document",
+    r"AcroExch.Document.DC",
+    r"FoxitReader.Document",
+    r"txtfile",
+    r"rtffile",
+    r"docxfile",
+    r"docfile",
+    r"batfile",
+    r"cmdfile",
+    r"fonfile",
+    r"htmlfile",
+    r"inffile",
+    r"inifile",
+    r"JSEFile",
+    r"otffile",
+    r"pfmfile",
+    r"regfile",
+    r"ttcfile",
+    r"ttffile",
+    r"VBEFile",
+    r"VBSFile",
+    r"WSFFile",
+)
+
+# Кэш дополнительных (нестандартных) базовых путей.
+# Загружается однократно при первом обращении и живёт до перезапуска программы.
+_PRINT_EXTRA_BASES_CACHE = None
+
 # Маппинг ini_key → item_type для check_menu_item_exists (about.py)
 CONTEXT_MENU_KEYS = {
     'paint3d': 'paint3d',
+    'photos_edit': 'photos_edit',
+    'create_video': 'create_video',
     'wallpaper': 'wallpaper',
     'print': 'print',
     'powershell': 'powershell',
@@ -89,6 +128,8 @@ CONTEXT_MENU_KEYS = {
 # Маппинг ini_key → имя пункта меню (для about.py при применении INI)
 ITEM_NAME_BY_KEY = {
     'paint3d': 'Изменить с помощью Paint 3D',
+    'photos_edit': 'Изменить с помощью Фотографии',
+    'create_video': 'Создать новое видео',
     'wallpaper': 'Сделать фоном рабочего стола',
     'print': 'Печать',
     'powershell': 'Открыть окно PowerShell здесь',
@@ -113,6 +154,239 @@ ITEM_NAME_BY_KEY = {
     'system_menu': 'Система',
 }
 
+
+# ---------- Проверки версии/редакции (аналог taskbar.py) ----------
+
+def _get_windows_build():
+    """Возвращает build-номер Windows (например, 19045). 0 при ошибке."""
+    try:
+        import platform
+        parts = platform.version().split('.')
+        if len(parts) >= 3:
+            return int(parts[2])
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(
+            ['reg', 'query',
+             r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
+             '/v', 'CurrentBuildNumber'],
+            capture_output=True, text=True, encoding='cp866',
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        m = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', r.stdout)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    return 0
+
+
+def _get_windows_edition():
+    """Возвращает EditionID (EnterpriseS, Professional, ...)."""
+    try:
+        r = subprocess.run(
+            ['reg', 'query',
+             r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
+             '/v', 'EditionID'],
+            capture_output=True, text=True, encoding='cp866',
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
+        return m.group(1) if m else ''
+    except Exception:
+        return ''
+
+
+_WIN_BUILD_CACHE = None
+_WIN_EDITION_CACHE = None
+
+
+def _win_build():
+    global _WIN_BUILD_CACHE
+    if _WIN_BUILD_CACHE is None:
+        _WIN_BUILD_CACHE = _get_windows_build()
+    return _WIN_BUILD_CACHE
+
+
+def _win_edition():
+    global _WIN_EDITION_CACHE
+    if _WIN_EDITION_CACHE is None:
+        _WIN_EDITION_CACHE = _get_windows_edition()
+    return _WIN_EDITION_CACHE
+
+
+def _is_ltsc_edition():
+    return _win_edition() == 'EnterpriseS'
+
+
+def is_paint3d_supported():
+    """Paint 3D: с Windows 10 1703 (build >= 15063), не LTSC"""
+    if _is_ltsc_edition():
+        return False
+    return _win_build() >= 15063
+
+
+def is_photos_supported():
+    """Фотографии (ShellEdit): с Windows 10 1703 (build >= 15063), не LTSC"""
+    if _is_ltsc_edition():
+        return False
+    return _win_build() >= 15063
+
+
+def is_create_video_supported():
+    """Создать новое видео: с Windows 10 1809 (build >= 17763), не LTSC"""
+    if _is_ltsc_edition():
+        return False
+    return _win_build() >= 17763
+
+
+# ---------- AppX (Photos) helpers ----------
+
+def _appx_hkcu_path(kind):
+    if kind == "photos_edit":
+        return f"Software\\Classes\\{PHOTOS_SHELL_EDIT}"
+    if kind == "create_video":
+        return f"Software\\Classes\\{PHOTOS_SHELL_CREATE_VIDEO}"
+    return None
+
+
+def _appx_is_hidden(kind):
+    path = _appx_hkcu_path(kind)
+    if not path:
+        return False
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path) as key:
+            try:
+                winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                return True
+            except FileNotFoundError:
+                return False
+    except (FileNotFoundError, OSError):
+        return False
+
+
+# ---------- Комбинированный поиск базовых путей print ----------
+
+def _invalidate_print_cache():
+    global _PRINT_EXTRA_BASES_CACHE
+    _PRINT_EXTRA_BASES_CACHE = None
+
+
+def _iter_default_print_bases():
+    """Быстро проверяет стандартные базовые пути: возвращает те, что реально
+    есть в HKCR (есть shell\\print)."""
+    result = []
+    for base in DEFAULT_PRINT_BASES:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, f"{base}\\shell\\print"):
+                result.append(base)
+        except (FileNotFoundError, OSError):
+            pass
+    return result
+
+
+def _scan_extra_print_bases():
+    """Сканирует HKCR на предмет shell\\print, пропуская стандартные пути."""
+    default_lower = {b.lower() for b in DEFAULT_PRINT_BASES}
+    extra = []
+    seen = set()
+
+    def _add(base):
+        if not base:
+            return
+        low = base.lower()
+        if low in default_lower or low in seen:
+            return
+        seen.add(low)
+        extra.append(base)
+
+    def _scan_key(path):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, path) as key:
+                try:
+                    with winreg.OpenKey(key, "shell") as shell_key:
+                        i = 0
+                        while True:
+                            try:
+                                sub = winreg.EnumKey(shell_key, i)
+                            except OSError:
+                                break
+                            i += 1
+                            if sub.lower() == "print":
+                                return True
+                except (FileNotFoundError, OSError):
+                    pass
+        except (FileNotFoundError, OSError):
+            pass
+        return False
+
+    # 1) Верхний уровень HKCR
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "") as root:
+            i = 0
+            while True:
+                try:
+                    top = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                i += 1
+                low = top.lower()
+                if low.startswith((".", "clsid", "interface", "typelib",
+                                   "wow6432node", "applications")):
+                    continue
+                if _scan_key(top):
+                    _add(top)
+    except (FileNotFoundError, OSError):
+        pass
+
+    # 2) SystemFileAssociations\*
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "SystemFileAssociations") as sfa:
+            i = 0
+            while True:
+                try:
+                    sub = winreg.EnumKey(sfa, i)
+                except OSError:
+                    break
+                i += 1
+                base = f"SystemFileAssociations\\{sub}"
+                if _scan_key(base):
+                    _add(base)
+    except (FileNotFoundError, OSError):
+        pass
+
+    # 3) Applications\<exe>
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "Applications") as apps:
+            i = 0
+            while True:
+                try:
+                    exe = winreg.EnumKey(apps, i)
+                except OSError:
+                    break
+                i += 1
+                base = f"Applications\\{exe}"
+                if _scan_key(base):
+                    _add(base)
+    except (FileNotFoundError, OSError):
+        pass
+
+    return extra
+
+
+def _find_extra_print_bases():
+    """Возвращает список нестандартных базовых путей (кэш на весь сеанс)."""
+    global _PRINT_EXTRA_BASES_CACHE
+
+    if _PRINT_EXTRA_BASES_CACHE is not None:
+        return _PRINT_EXTRA_BASES_CACHE
+
+    _PRINT_EXTRA_BASES_CACHE = _scan_extra_print_bases()
+    return _PRINT_EXTRA_BASES_CACHE
+
+
+# ---------- Проверки для пунктов меню ----------
 
 def _wallpaper_hkcu_path(ext):
     return f"Software\\Classes\\SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"
@@ -293,6 +567,22 @@ def check_menu_item_exists(item_type):
                     continue
             return False
 
+        if item_type == "photos_edit":
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, PHOTOS_SHELL_EDIT):
+                    pass
+            except (FileNotFoundError, OSError):
+                return False
+            return not _appx_is_hidden("photos_edit")
+
+        if item_type == "create_video":
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, PHOTOS_SHELL_CREATE_VIDEO):
+                    pass
+            except (FileNotFoundError, OSError):
+                return False
+            return not _appx_is_hidden("create_video")
+
         if item_type == "wallpaper":
             any_exists = False
             for ext in WALLPAPER_EXTS:
@@ -308,15 +598,10 @@ def check_menu_item_exists(item_type):
             return False
 
         if item_type == "print":
-            any_exists = False
-            for base in PRINT_CLASSES:
-                try:
-                    with winreg.OpenKey(
-                            winreg.HKEY_CLASSES_ROOT,
-                            f"{base}\\shell\\print"):
-                        any_exists = True
-                except (FileNotFoundError, OSError):
-                    continue
+            for base in _iter_default_print_bases():
+                if not _print_is_hidden(base):
+                    return True
+            for base in _find_extra_print_bases():
                 if not _print_is_hidden(base):
                     return True
             return False
@@ -526,7 +811,29 @@ class DesktopMenuTab:
                 "remove_command": self.remove_paint3d_edit,
                 "check_command": lambda: self.check_menu_item_exists("paint3d"),
                 "enabled": False,
-                "default_enabled": True
+                "default_enabled": True,
+                "supported_check": is_paint3d_supported,
+                "unsupported_tip": "Доступно в Windows 10 1703 и выше",
+            },
+            {
+                "name": "Изменить с помощью Фотографии",
+                "add_command": self.add_photos_edit,
+                "remove_command": self.remove_photos_edit,
+                "check_command": lambda: self.check_menu_item_exists("photos_edit"),
+                "enabled": False,
+                "default_enabled": True,
+                "supported_check": is_photos_supported,
+                "unsupported_tip": "Доступно в Windows 10 1703 и выше",
+            },
+            {
+                "name": "Создать новое видео",
+                "add_command": self.add_create_video,
+                "remove_command": self.remove_create_video,
+                "check_command": lambda: self.check_menu_item_exists("create_video"),
+                "enabled": False,
+                "default_enabled": True,
+                "supported_check": is_create_video_supported,
+                "unsupported_tip": "Доступно в Windows 10 1809 и выше",
             },
             {
                 "name": "Сделать фоном рабочего стола",
@@ -720,6 +1027,16 @@ class DesktopMenuTab:
 
             btn = self.create_menu_item_button(button_frame, item)
             self.menu_item_buttons.append({"button": btn, "data": item})
+
+            supported_check = item.get("supported_check")
+            if supported_check is not None:
+                if not supported_check():
+                    btn.config(state="disabled")
+                    tip_text = item.get("unsupported_tip", "Недоступно на этой версии")
+                    if _is_ltsc_edition():
+                        tip_text = "Недоступно в LTSC редакциях"
+                    self.create_tooltip(btn, tip_text)
+                    continue
 
             if item.get("add_tooltip") and item["name"] in self.TOOLTIP_KEEP_NAMES:
                 self.create_tooltip(btn, item["add_tooltip"])
@@ -1801,6 +2118,90 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
+    # ---- AppX (Photos): «Изменить с помощью Фотографии» и «Создать новое видео» ----
+
+    def _hide_appx_for_user(self, kind):
+        path = _appx_hkcu_path(kind)
+        if not path:
+            return False
+        try:
+            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
+                                  winreg.REG_SZ, "")
+            return True
+        except Exception:
+            return False
+
+    def _unhide_appx_for_user(self, kind):
+        path = _appx_hkcu_path(kind)
+        if not path:
+            return False
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
+            try:
+                num_values = winreg.QueryInfoKey(key)[1]
+                only_pao = False
+                if num_values == 1:
+                    try:
+                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                        only_pao = True
+                    except FileNotFoundError:
+                        pass
+                if only_pao:
+                    key.Close()
+                    try:
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
+                    except FileNotFoundError:
+                        pass
+                    key.Close()
+            except Exception:
+                try:
+                    key.Close()
+                except Exception:
+                    pass
+                raise
+            return True
+        except FileNotFoundError:
+            return True
+        except Exception:
+            return False
+
+    def add_photos_edit(self):
+        try:
+            self._unhide_appx_for_user("photos_edit")
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_photos_edit(self):
+        try:
+            self._hide_appx_for_user("photos_edit")
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
+    def add_create_video(self):
+        try:
+            self._unhide_appx_for_user("create_video")
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_create_video(self):
+        try:
+            self._hide_appx_for_user("create_video")
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
     # ---- «Сделать фоном рабочего стола» (ProgrammaticAccessOnly в HKCU) ----
 
     @staticmethod
@@ -1854,15 +2255,11 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
 
-    # ---- «Печать» (ProgrammaticAccessOnly в HKCU) ----
-
-    @staticmethod
-    def _print_hkcu_path(base):
-        return f"Software\\Classes\\{base}\\shell\\print"
+    # ---- «Печать» (ProgrammaticAccessOnly в HKCU, комбинированный подход) ----
 
     def _hide_print_for_user(self, base):
         try:
-            path = self._print_hkcu_path(base)
+            path = _print_hkcu_path(base)
             winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
                                 winreg.KEY_SET_VALUE) as key:
@@ -1873,7 +2270,7 @@ class DesktopMenuTab:
             return False
 
     def _unhide_print_for_user(self, base):
-        path = self._print_hkcu_path(base)
+        path = _print_hkcu_path(base)
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
                                  winreg.KEY_READ | winreg.KEY_SET_VALUE)
@@ -1912,7 +2309,9 @@ class DesktopMenuTab:
 
     def add_print(self):
         try:
-            for base in PRINT_CLASSES:
+            for base in _iter_default_print_bases():
+                self._unhide_print_for_user(base)
+            for base in _find_extra_print_bases():
                 self._unhide_print_for_user(base)
             self.update_menu_items_status()
         except Exception as e:
@@ -1921,7 +2320,10 @@ class DesktopMenuTab:
     def remove_print(self):
         try:
             ok = 0
-            for base in PRINT_CLASSES:
+            for base in _iter_default_print_bases():
+                if self._hide_print_for_user(base):
+                    ok += 1
+            for base in _find_extra_print_bases():
                 if self._hide_print_for_user(base):
                     ok += 1
             self.update_menu_items_status()
@@ -1952,8 +2354,6 @@ class DesktopMenuTab:
             return False
 
     def _unhide_powershell_for_user(self, base):
-        """Удаляет весь HKCU-ключ shell\\PowerShell, если там был только
-        ProgrammaticAccessOnly; иначе удаляет только это значение."""
         path = self._powershell_hkcu_path(base)
         try:
             key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
@@ -2339,8 +2739,12 @@ class DesktopMenuTab:
     def set_default_settings(self):
         """Сброс пунктов контекстного меню к стандартным (без окна)."""
         try:
+            _invalidate_print_cache()
             for item in self.menu_item_buttons:
                 item_data = item["data"]
+                supported_check = item_data.get("supported_check")
+                if supported_check is not None and not supported_check():
+                    continue
                 current_state = item_data["check_command"]()
                 if item_data.get("default_enabled", True) and not current_state:
                     try:

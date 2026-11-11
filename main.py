@@ -262,7 +262,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "2.2.0.203"
+        self.version = "2.2.0.204"
         self.logo_photo = None
         self.modules_loaded = self._load_modules()
         self.current_module_instance = None

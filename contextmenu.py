@@ -25,9 +25,46 @@ MODERN_SHARING_PATHS = (
 PAINT3D_EXTS = ('bmp', 'fbx', 'gif', 'glb', 'jfif', 'jpe', 'jpeg', 'jpg',
                 'obj', 'ply', 'png', 'stl', 'tif', 'tiff')
 
+# Расширения для пункта «Сделать фоном рабочего стола»
+WALLPAPER_EXTS = ('bmp', 'dib', 'gif', 'jfif', 'jpe', 'jpeg', 'jpg',
+                  'png', 'tif', 'tiff', 'wdp', 'heic', 'heif', 'avif')
+
+# Классы файлов, у которых есть подменю "Печать"
+PRINT_CLASSES = (
+    'SystemFileAssociations\\image',
+    'batfile',
+    'cmdfile',
+    'docxfile',
+    'fonfile',
+    'htmlfile',
+    'inffile',
+    'inifile',
+    'JSEFile',
+    'otffile',
+    'pfmfile',
+    'regfile',
+    'rtffile',
+    'ttcfile',
+    'ttffile',
+    'txtfile',
+    'VBEFile',
+    'VBSFile',
+    'WSFFile',
+)
+
+# Базовые классы для пункта «Открыть окно PowerShell здесь»
+POWERSHELL_CLASSES = (
+    'Directory',
+    'Directory\\Background',
+    'Drive',
+)
+
 # Маппинг ini_key → item_type для check_menu_item_exists (about.py)
 CONTEXT_MENU_KEYS = {
     'paint3d': 'paint3d',
+    'wallpaper': 'wallpaper',
+    'print': 'print',
+    'powershell': 'powershell',
     'compatibility': 'compatibility',
     'pin_to_start': 'pin_to_start',
     'pin_to_taskbar': 'pin_to_taskbar',
@@ -52,6 +89,9 @@ CONTEXT_MENU_KEYS = {
 # Маппинг ini_key → имя пункта меню (для about.py при применении INI)
 ITEM_NAME_BY_KEY = {
     'paint3d': 'Изменить с помощью Paint 3D',
+    'wallpaper': 'Сделать фоном рабочего стола',
+    'print': 'Печать',
+    'powershell': 'Открыть окно PowerShell здесь',
     'compatibility': 'Исправление проблем с совместимостью',
     'pin_to_start': 'Закрепить на начальном экране',
     'pin_to_taskbar': 'Закрепить на Панели задач',
@@ -72,6 +112,54 @@ ITEM_NAME_BY_KEY = {
     'admin_menu': 'Администрирование',
     'system_menu': 'Система',
 }
+
+
+def _wallpaper_hkcu_path(ext):
+    return f"Software\\Classes\\SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"
+
+
+def _wallpaper_is_hidden(ext):
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _wallpaper_hkcu_path(ext)) as key:
+            try:
+                winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                return True
+            except FileNotFoundError:
+                return False
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _print_hkcu_path(base):
+    return f"Software\\Classes\\{base}\\shell\\print"
+
+
+def _print_is_hidden(base):
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _print_hkcu_path(base)) as key:
+            try:
+                winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                return True
+            except FileNotFoundError:
+                return False
+    except (FileNotFoundError, OSError):
+        return False
+
+
+def _powershell_hkcu_path(base):
+    return f"Software\\Classes\\{base}\\shell\\PowerShell"
+
+
+def _powershell_is_hidden(base):
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _powershell_hkcu_path(base)) as key:
+            try:
+                winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                return True
+            except FileNotFoundError:
+                return False
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def check_menu_item_exists(item_type):
@@ -205,6 +293,48 @@ def check_menu_item_exists(item_type):
                     continue
             return False
 
+        if item_type == "wallpaper":
+            any_exists = False
+            for ext in WALLPAPER_EXTS:
+                try:
+                    with winreg.OpenKey(
+                            winreg.HKEY_CLASSES_ROOT,
+                            f"SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"):
+                        any_exists = True
+                except (FileNotFoundError, OSError):
+                    continue
+                if not _wallpaper_is_hidden(ext):
+                    return True
+            return False
+
+        if item_type == "print":
+            any_exists = False
+            for base in PRINT_CLASSES:
+                try:
+                    with winreg.OpenKey(
+                            winreg.HKEY_CLASSES_ROOT,
+                            f"{base}\\shell\\print"):
+                        any_exists = True
+                except (FileNotFoundError, OSError):
+                    continue
+                if not _print_is_hidden(base):
+                    return True
+            return False
+
+        if item_type == "powershell":
+            any_exists = False
+            for base in POWERSHELL_CLASSES:
+                try:
+                    with winreg.OpenKey(
+                            winreg.HKEY_CLASSES_ROOT,
+                            f"{base}\\shell\\PowerShell"):
+                        any_exists = True
+                except (FileNotFoundError, OSError):
+                    continue
+                if not _powershell_is_hidden(base):
+                    return True
+            return False
+
         if item_type == "defender":
             defender_path = r'SOFTWARE\Classes\CLSID\{09A47860-11B0-4DA5-AFA5-26D86198A780}'
             defender_no = r'SOFTWARE\Classes\CLSID\{09A47860-11B0-4DA5-AFA5-26D86198A780}_no'
@@ -327,6 +457,17 @@ class ContextMenuModule:
 
 
 class DesktopMenuTab:
+    # Кнопки, у которых остаётся всплывающая подсказка
+    TOOLTIP_KEEP_NAMES = {
+        "Диспетчер задач",
+        "Очистить буфер",
+        "Перезапустить explorer",
+        "Редактор реестра",
+        "Выключение/Перезагрузка/Гибернация",
+        "Администрирование",
+        "Система",
+    }
+
     def __init__(self, parent):
         self.parent = parent
         self.create_widgets()
@@ -381,7 +522,6 @@ class DesktopMenuTab:
         self.menu_items_data = [
             {
                 "name": "Изменить с помощью Paint 3D",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_paint3d_edit,
                 "remove_command": self.remove_paint3d_edit,
                 "check_command": lambda: self.check_menu_item_exists("paint3d"),
@@ -389,8 +529,31 @@ class DesktopMenuTab:
                 "default_enabled": True
             },
             {
+                "name": "Сделать фоном рабочего стола",
+                "add_command": self.add_wallpaper,
+                "remove_command": self.remove_wallpaper,
+                "check_command": lambda: self.check_menu_item_exists("wallpaper"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Печать",
+                "add_command": self.add_print,
+                "remove_command": self.remove_print,
+                "check_command": lambda: self.check_menu_item_exists("print"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Открыть окно PowerShell здесь",
+                "add_command": self.add_powershell,
+                "remove_command": self.remove_powershell,
+                "check_command": lambda: self.check_menu_item_exists("powershell"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
                 "name": "Исправление проблем с совместимостью",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_compatibility,
                 "remove_command": self.remove_compatibility,
                 "check_command": lambda: self.check_menu_item_exists("compatibility"),
@@ -399,7 +562,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Закрепить на начальном экране",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_pin_to_start,
                 "remove_command": self.remove_pin_to_start,
                 "check_command": lambda: self.check_menu_item_exists("pin_to_start"),
@@ -408,7 +570,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Закрепить на Панели задач",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_pin_to_taskbar,
                 "remove_command": self.remove_pin_to_taskbar,
                 "check_command": lambda: self.check_menu_item_exists("pin_to_taskbar"),
@@ -417,7 +578,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Копировать как путь",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_copy_as_path,
                 "remove_command": self.remove_copy_as_path,
                 "check_command": lambda: self.check_menu_item_exists("copy_as_path"),
@@ -426,7 +586,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Отправить (metro)",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_modern_sharing,
                 "remove_command": self.remove_modern_sharing,
                 "check_command": lambda: self.check_menu_item_exists("modern_sharing"),
@@ -435,7 +594,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Передать на устройство",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_send_to_device,
                 "remove_command": self.remove_send_to_device,
                 "check_command": lambda: self.check_menu_item_exists("send_to_device"),
@@ -444,7 +602,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Предоставить доступ к",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_share_access,
                 "remove_command": self.remove_share_access,
                 "check_command": lambda: self.check_menu_item_exists("share_access"),
@@ -453,7 +610,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Проверка с использованием Windows Defender",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_defender_scan,
                 "remove_command": self.remove_defender_scan,
                 "check_command": lambda: self.check_menu_item_exists("defender"),
@@ -462,7 +618,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Восстановить прежнюю версию",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_previous_version,
                 "remove_command": self.remove_previous_version,
                 "check_command": lambda: self.check_menu_item_exists("previous_version"),
@@ -471,7 +626,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Стать владельцем",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_take_ownership,
                 "remove_command": self.remove_take_ownership,
                 "check_command": lambda: self.check_menu_item_exists("take_ownership"),
@@ -480,7 +634,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Копировать/Переместить в папку",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_copy_move_menu,
                 "remove_command": self.remove_copy_move_menu,
                 "check_command": lambda: self.check_menu_item_exists("copy_move"),
@@ -489,7 +642,6 @@ class DesktopMenuTab:
             },
             {
                 "name": "Удалить содержимое папки",
-                "add_tooltip": TIP_DESKTOP,
                 "add_command": self.add_delete_folder_content,
                 "remove_command": self.remove_delete_folder_content,
                 "check_command": lambda: self.check_menu_item_exists("delete_folder_content"),
@@ -569,7 +721,7 @@ class DesktopMenuTab:
             btn = self.create_menu_item_button(button_frame, item)
             self.menu_item_buttons.append({"button": btn, "data": item})
 
-            if item.get("add_tooltip"):
+            if item.get("add_tooltip") and item["name"] in self.TOOLTIP_KEEP_NAMES:
                 self.create_tooltip(btn, item["add_tooltip"])
 
         canvas.pack(side="left", fill="both", expand=True)
@@ -626,7 +778,6 @@ class DesktopMenuTab:
                 pass
 
     def create_command_store_entries(self):
-        """Создаёт записи в CommandStore. Возвращает True, если ВСЕ созданы."""
         try:
             command_store_path = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell'
 
@@ -1649,6 +1800,219 @@ class DesktopMenuTab:
             self.update_menu_items_status()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
+
+    # ---- «Сделать фоном рабочего стола» (ProgrammaticAccessOnly в HKCU) ----
+
+    @staticmethod
+    def _wallpaper_hkcu_path(ext):
+        return f"Software\\Classes\\SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"
+
+    def _hide_wallpaper_for_user(self, ext):
+        try:
+            path = self._wallpaper_hkcu_path(ext)
+            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
+                                  winreg.REG_SZ, "")
+            return True
+        except Exception:
+            return False
+
+    def _unhide_wallpaper_for_user(self, ext):
+        try:
+            path = self._wallpaper_hkcu_path(ext)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, "ProgrammaticAccessOnly")
+            return True
+        except FileNotFoundError:
+            return True
+        except Exception:
+            return False
+
+    def add_wallpaper(self):
+        try:
+            for ext in WALLPAPER_EXTS:
+                self._unhide_wallpaper_for_user(ext)
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_wallpaper(self):
+        try:
+            ok = 0
+            for ext in WALLPAPER_EXTS:
+                if self._hide_wallpaper_for_user(ext):
+                    ok += 1
+            self.update_menu_items_status()
+            if ok == 0:
+                messagebox.showerror(
+                    "Ошибка",
+                    "Не удалось скрыть пункт.\n"
+                    "Попробуйте запустить программу от имени администратора.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
+    # ---- «Печать» (ProgrammaticAccessOnly в HKCU) ----
+
+    @staticmethod
+    def _print_hkcu_path(base):
+        return f"Software\\Classes\\{base}\\shell\\print"
+
+    def _hide_print_for_user(self, base):
+        try:
+            path = self._print_hkcu_path(base)
+            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
+                                  winreg.REG_SZ, "")
+            return True
+        except Exception:
+            return False
+
+    def _unhide_print_for_user(self, base):
+        path = self._print_hkcu_path(base)
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
+            try:
+                num_values = winreg.QueryInfoKey(key)[1]
+                only_pao = False
+                if num_values == 1:
+                    try:
+                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                        only_pao = True
+                    except FileNotFoundError:
+                        pass
+                if only_pao:
+                    key.Close()
+                    try:
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
+                    except FileNotFoundError:
+                        pass
+                    key.Close()
+            except Exception:
+                try:
+                    key.Close()
+                except Exception:
+                    pass
+                raise
+            return True
+        except FileNotFoundError:
+            return True
+        except Exception:
+            return False
+
+    def add_print(self):
+        try:
+            for base in PRINT_CLASSES:
+                self._unhide_print_for_user(base)
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_print(self):
+        try:
+            ok = 0
+            for base in PRINT_CLASSES:
+                if self._hide_print_for_user(base):
+                    ok += 1
+            self.update_menu_items_status()
+            if ok == 0:
+                messagebox.showerror(
+                    "Ошибка",
+                    "Не удалось скрыть пункт.\n"
+                    "Попробуйте запустить программу от имени администратора.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
+    # ---- «Открыть окно PowerShell здесь» (ProgrammaticAccessOnly в HKCU) ----
+
+    @staticmethod
+    def _powershell_hkcu_path(base):
+        return f"Software\\Classes\\{base}\\shell\\PowerShell"
+
+    def _hide_powershell_for_user(self, base):
+        try:
+            path = self._powershell_hkcu_path(base)
+            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
+                                  winreg.REG_SZ, "")
+            return True
+        except Exception:
+            return False
+
+    def _unhide_powershell_for_user(self, base):
+        """Удаляет весь HKCU-ключ shell\\PowerShell, если там был только
+        ProgrammaticAccessOnly; иначе удаляет только это значение."""
+        path = self._powershell_hkcu_path(base)
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
+            try:
+                num_values = winreg.QueryInfoKey(key)[1]
+                only_pao = False
+                if num_values == 1:
+                    try:
+                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                        only_pao = True
+                    except FileNotFoundError:
+                        pass
+                if only_pao:
+                    key.Close()
+                    try:
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+                    except OSError:
+                        pass
+                else:
+                    try:
+                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
+                    except FileNotFoundError:
+                        pass
+                    key.Close()
+            except Exception:
+                try:
+                    key.Close()
+                except Exception:
+                    pass
+                raise
+            return True
+        except FileNotFoundError:
+            return True
+        except Exception:
+            return False
+
+    def add_powershell(self):
+        try:
+            for base in POWERSHELL_CLASSES:
+                self._unhide_powershell_for_user(base)
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_powershell(self):
+        try:
+            ok = 0
+            for base in POWERSHELL_CLASSES:
+                if self._hide_powershell_for_user(base):
+                    ok += 1
+            self.update_menu_items_status()
+            if ok == 0:
+                messagebox.showerror(
+                    "Ошибка",
+                    "Не удалось скрыть пункт.\n"
+                    "Попробуйте запустить программу от имени администратора.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
 
     def add_defender_scan(self):
         try:

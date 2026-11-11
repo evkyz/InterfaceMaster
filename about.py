@@ -180,7 +180,7 @@ class AboutModule:
 
         self._section(info, "Разработка",
                       "Идея: EvKyz\nРеализация: DeepSeek AI\n"
-                      "Сборка: 10 ноября 2026\nЛицензия: MIT License",
+                      "Сборка: 11 ноября 2026\nЛицензия: MIT License",
                       font=('Arial', 8), fg='#7f8c8d', center=True)
 
         self._buttons(container)

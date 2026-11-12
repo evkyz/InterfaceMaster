@@ -37,6 +37,13 @@ POWERSHELL_CLASSES = (
     'Drive',
 )
 
+# Базовые классы для пункта «Закрепить на панели быстрого доступа» (pintohome).
+PINTOHOME_CLASSES = (
+    'Drive',
+    'Folder',
+    'Network',
+)
+
 # AppX-пакет «Фотографии» (Photos) — ShellEdit и ShellCreateVideo
 PHOTOS_APPX_CLSID = r'AppX43hnxtbyyps62jhe9sqpdzxn1790zetc'
 PHOTOS_SHELL_EDIT = rf'{PHOTOS_APPX_CLSID}\Shell\ShellEdit'
@@ -93,26 +100,26 @@ DEFAULT_PRINT_BASES = (
 )
 
 # Кэш дополнительных (нестандартных) базовых путей.
-# Загружается однократно при первом обращении и живёт до перезапуска программы.
 _PRINT_EXTRA_BASES_CACHE = None
 
 # Маппинг ini_key → item_type для check_menu_item_exists (about.py)
 CONTEXT_MENU_KEYS = {
+    'pintohome': 'pintohome',
+    'powershell': 'powershell',
+    'share_access': 'share_access',
+    'modern_sharing': 'modern_sharing',
+    'defender': 'defender',
+    'previous_version': 'previous_version',
+    'pin_to_start': 'pin_to_start',
+    'pin_to_taskbar': 'pin_to_taskbar',
+    'copy_as_path': 'copy_as_path',
+    'compatibility': 'compatibility',
     'paint3d': 'paint3d',
     'photos_edit': 'photos_edit',
     'create_video': 'create_video',
     'wallpaper': 'wallpaper',
     'print': 'print',
-    'powershell': 'powershell',
-    'compatibility': 'compatibility',
-    'pin_to_start': 'pin_to_start',
-    'pin_to_taskbar': 'pin_to_taskbar',
-    'copy_as_path': 'copy_as_path',
-    'modern_sharing': 'modern_sharing',
     'send_to_device': 'send_to_device',
-    'share_access': 'share_access',
-    'defender': 'defender',
-    'previous_version': 'previous_version',
     'take_ownership': 'take_ownership',
     'copy_move': 'copy_move',
     'delete_folder_content': 'delete_folder_content',
@@ -127,21 +134,22 @@ CONTEXT_MENU_KEYS = {
 
 # Маппинг ini_key → имя пункта меню (для about.py при применении INI)
 ITEM_NAME_BY_KEY = {
+    'pintohome': 'Закрепить на панели быстрого доступа',
+    'powershell': 'Открыть окно PowerShell здесь',
+    'share_access': 'Предоставить доступ к',
+    'modern_sharing': 'Отправить (metro)',
+    'defender': 'Проверка с использованием Windows Defender',
+    'previous_version': 'Восстановить прежнюю версию',
+    'pin_to_start': 'Закрепить на начальном экране',
+    'pin_to_taskbar': 'Закрепить на Панели задач',
+    'copy_as_path': 'Копировать как путь',
+    'compatibility': 'Исправление проблем с совместимостью',
     'paint3d': 'Изменить с помощью Paint 3D',
     'photos_edit': 'Изменить с помощью Фотографии',
     'create_video': 'Создать новое видео',
     'wallpaper': 'Сделать фоном рабочего стола',
     'print': 'Печать',
-    'powershell': 'Открыть окно PowerShell здесь',
-    'compatibility': 'Исправление проблем с совместимостью',
-    'pin_to_start': 'Закрепить на начальном экране',
-    'pin_to_taskbar': 'Закрепить на Панели задач',
-    'copy_as_path': 'Копировать как путь',
-    'modern_sharing': 'Отправить (metro)',
     'send_to_device': 'Передать на устройство',
-    'share_access': 'Предоставить доступ к',
-    'defender': 'Проверка с использованием Windows Defender',
-    'previous_version': 'Восстановить прежнюю версию',
     'take_ownership': 'Стать владельцем',
     'copy_move': 'Копировать/Переместить в папку',
     'delete_folder_content': 'Удалить содержимое папки',
@@ -155,10 +163,23 @@ ITEM_NAME_BY_KEY = {
 }
 
 
-# ---------- Проверки версии/редакции (аналог taskbar.py) ----------
+# ---------- Проверки версии/редакции ----------
 
 def _get_windows_build():
-    """Возвращает build-номер Windows (например, 19045). 0 при ошибке."""
+    """Build-номер Windows. Основной источник — реестр (CurrentBuildNumber)."""
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, 'CurrentBuildNumber')
+            return int(value)
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        pass
+    try:
+        return sys.getwindowsversion().build
+    except Exception:
+        pass
     try:
         import platform
         parts = platform.version().split('.')
@@ -166,35 +187,19 @@ def _get_windows_build():
             return int(parts[2])
     except Exception:
         pass
-    try:
-        r = subprocess.run(
-            ['reg', 'query',
-             r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
-             '/v', 'CurrentBuildNumber'],
-            capture_output=True, text=True, encoding='cp866',
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        m = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', r.stdout)
-        if m:
-            return int(m.group(1))
-    except Exception:
-        pass
     return 0
 
 
 def _get_windows_edition():
-    """Возвращает EditionID (EnterpriseS, Professional, ...)."""
+    """EditionID (EnterpriseS, Professional, ...) из реестра."""
     try:
-        r = subprocess.run(
-            ['reg', 'query',
-             r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
-             '/v', 'EditionID'],
-            capture_output=True, text=True, encoding='cp866',
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
-        return m.group(1) if m else ''
-    except Exception:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, 'EditionID')
+            return value if isinstance(value, str) else ''
+    except (FileNotFoundError, OSError, TypeError):
         return ''
 
 
@@ -274,8 +279,6 @@ def _invalidate_print_cache():
 
 
 def _iter_default_print_bases():
-    """Быстро проверяет стандартные базовые пути: возвращает те, что реально
-    есть в HKCR (есть shell\\print)."""
     result = []
     for base in DEFAULT_PRINT_BASES:
         try:
@@ -287,7 +290,6 @@ def _iter_default_print_bases():
 
 
 def _scan_extra_print_bases():
-    """Сканирует HKCR на предмет shell\\print, пропуская стандартные пути."""
     default_lower = {b.lower() for b in DEFAULT_PRINT_BASES}
     extra = []
     seen = set()
@@ -321,7 +323,6 @@ def _scan_extra_print_bases():
             pass
         return False
 
-    # 1) Верхний уровень HKCR
     try:
         with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "") as root:
             i = 0
@@ -340,7 +341,6 @@ def _scan_extra_print_bases():
     except (FileNotFoundError, OSError):
         pass
 
-    # 2) SystemFileAssociations\*
     try:
         with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "SystemFileAssociations") as sfa:
             i = 0
@@ -356,7 +356,6 @@ def _scan_extra_print_bases():
     except (FileNotFoundError, OSError):
         pass
 
-    # 3) Applications\<exe>
     try:
         with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "Applications") as apps:
             i = 0
@@ -376,12 +375,9 @@ def _scan_extra_print_bases():
 
 
 def _find_extra_print_bases():
-    """Возвращает список нестандартных базовых путей (кэш на весь сеанс)."""
     global _PRINT_EXTRA_BASES_CACHE
-
     if _PRINT_EXTRA_BASES_CACHE is not None:
         return _PRINT_EXTRA_BASES_CACHE
-
     _PRINT_EXTRA_BASES_CACHE = _scan_extra_print_bases()
     return _PRINT_EXTRA_BASES_CACHE
 
@@ -436,8 +432,23 @@ def _powershell_is_hidden(base):
         return False
 
 
+def _pintohome_hkcu_path(base):
+    return f"Software\\Classes\\{base}\\shell\\pintohome"
+
+
+def _pintohome_is_hidden(base):
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _pintohome_hkcu_path(base)) as key:
+            try:
+                winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                return True
+            except FileNotFoundError:
+                return False
+    except (FileNotFoundError, OSError):
+        return False
+
+
 def check_menu_item_exists(item_type):
-    """Проверка существования пункта меню без UI."""
     try:
         if item_type == "admin_menu":
             for hive, path in (
@@ -584,13 +595,12 @@ def check_menu_item_exists(item_type):
             return not _appx_is_hidden("create_video")
 
         if item_type == "wallpaper":
-            any_exists = False
             for ext in WALLPAPER_EXTS:
                 try:
                     with winreg.OpenKey(
                             winreg.HKEY_CLASSES_ROOT,
                             f"SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"):
-                        any_exists = True
+                        pass
                 except (FileNotFoundError, OSError):
                     continue
                 if not _wallpaper_is_hidden(ext):
@@ -606,14 +616,26 @@ def check_menu_item_exists(item_type):
                     return True
             return False
 
+        if item_type == "pintohome":
+            for base in PINTOHOME_CLASSES:
+                try:
+                    with winreg.OpenKey(
+                            winreg.HKEY_CLASSES_ROOT,
+                            f"{base}\\shell\\pintohome"):
+                        pass
+                except (FileNotFoundError, OSError):
+                    continue
+                if not _pintohome_is_hidden(base):
+                    return True
+            return False
+
         if item_type == "powershell":
-            any_exists = False
             for base in POWERSHELL_CLASSES:
                 try:
                     with winreg.OpenKey(
                             winreg.HKEY_CLASSES_ROOT,
                             f"{base}\\shell\\PowerShell"):
-                        any_exists = True
+                        pass
                 except (FileNotFoundError, OSError):
                     continue
                 if not _powershell_is_hidden(base):
@@ -742,7 +764,6 @@ class ContextMenuModule:
 
 
 class DesktopMenuTab:
-    # Кнопки, у которых остаётся всплывающая подсказка
     TOOLTIP_KEEP_NAMES = {
         "Диспетчер задач",
         "Очистить буфер",
@@ -806,6 +827,86 @@ class DesktopMenuTab:
 
         self.menu_items_data = [
             {
+                "name": "Закрепить на панели быстрого доступа",
+                "add_command": self.add_pintohome,
+                "remove_command": self.remove_pintohome,
+                "check_command": lambda: self.check_menu_item_exists("pintohome"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Открыть окно PowerShell здесь",
+                "add_command": self.add_powershell,
+                "remove_command": self.remove_powershell,
+                "check_command": lambda: self.check_menu_item_exists("powershell"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Предоставить доступ к",
+                "add_command": self.add_share_access,
+                "remove_command": self.remove_share_access,
+                "check_command": lambda: self.check_menu_item_exists("share_access"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Отправить (metro)",
+                "add_command": self.add_modern_sharing,
+                "remove_command": self.remove_modern_sharing,
+                "check_command": lambda: self.check_menu_item_exists("modern_sharing"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Проверка с использованием Windows Defender",
+                "add_command": self.add_defender_scan,
+                "remove_command": self.remove_defender_scan,
+                "check_command": lambda: self.check_menu_item_exists("defender"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Восстановить прежнюю версию",
+                "add_command": self.add_previous_version,
+                "remove_command": self.remove_previous_version,
+                "check_command": lambda: self.check_menu_item_exists("previous_version"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Закрепить на начальном экране",
+                "add_command": self.add_pin_to_start,
+                "remove_command": self.remove_pin_to_start,
+                "check_command": lambda: self.check_menu_item_exists("pin_to_start"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Закрепить на Панели задач",
+                "add_command": self.add_pin_to_taskbar,
+                "remove_command": self.remove_pin_to_taskbar,
+                "check_command": lambda: self.check_menu_item_exists("pin_to_taskbar"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Копировать как путь",
+                "add_command": self.add_copy_as_path,
+                "remove_command": self.remove_copy_as_path,
+                "check_command": lambda: self.check_menu_item_exists("copy_as_path"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
+                "name": "Исправление проблем с совместимостью",
+                "add_command": self.add_compatibility,
+                "remove_command": self.remove_compatibility,
+                "check_command": lambda: self.check_menu_item_exists("compatibility"),
+                "enabled": False,
+                "default_enabled": True
+            },
+            {
                 "name": "Изменить с помощью Paint 3D",
                 "add_command": self.add_paint3d_edit,
                 "remove_command": self.remove_paint3d_edit,
@@ -852,82 +953,10 @@ class DesktopMenuTab:
                 "default_enabled": True
             },
             {
-                "name": "Открыть окно PowerShell здесь",
-                "add_command": self.add_powershell,
-                "remove_command": self.remove_powershell,
-                "check_command": lambda: self.check_menu_item_exists("powershell"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Исправление проблем с совместимостью",
-                "add_command": self.add_compatibility,
-                "remove_command": self.remove_compatibility,
-                "check_command": lambda: self.check_menu_item_exists("compatibility"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Закрепить на начальном экране",
-                "add_command": self.add_pin_to_start,
-                "remove_command": self.remove_pin_to_start,
-                "check_command": lambda: self.check_menu_item_exists("pin_to_start"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Закрепить на Панели задач",
-                "add_command": self.add_pin_to_taskbar,
-                "remove_command": self.remove_pin_to_taskbar,
-                "check_command": lambda: self.check_menu_item_exists("pin_to_taskbar"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Копировать как путь",
-                "add_command": self.add_copy_as_path,
-                "remove_command": self.remove_copy_as_path,
-                "check_command": lambda: self.check_menu_item_exists("copy_as_path"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Отправить (metro)",
-                "add_command": self.add_modern_sharing,
-                "remove_command": self.remove_modern_sharing,
-                "check_command": lambda: self.check_menu_item_exists("modern_sharing"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
                 "name": "Передать на устройство",
                 "add_command": self.add_send_to_device,
                 "remove_command": self.remove_send_to_device,
                 "check_command": lambda: self.check_menu_item_exists("send_to_device"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Предоставить доступ к",
-                "add_command": self.add_share_access,
-                "remove_command": self.remove_share_access,
-                "check_command": lambda: self.check_menu_item_exists("share_access"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Проверка с использованием Windows Defender",
-                "add_command": self.add_defender_scan,
-                "remove_command": self.remove_defender_scan,
-                "check_command": lambda: self.check_menu_item_exists("defender"),
-                "enabled": False,
-                "default_enabled": True
-            },
-            {
-                "name": "Восстановить прежнюю версию",
-                "add_command": self.add_previous_version,
-                "remove_command": self.remove_previous_version,
-                "check_command": lambda: self.check_menu_item_exists("previous_version"),
                 "enabled": False,
                 "default_enabled": True
             },
@@ -1920,51 +1949,77 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
+    def check_pin_to_start_exists(self):
+        """Проверяет, включён ли пункт 'Закрепить на начальном экране'
+        хотя бы для одного типа объектов (файлы или папки)."""
+        paths = (
+            (winreg.HKEY_LOCAL_MACHINE,
+             r'SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen'),
+            (winreg.HKEY_LOCAL_MACHINE,
+             r'SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen'),
+        )
+        for hive, path in paths:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+                    if value == "{470C0EBD-5D73-4d58-9CED-E91E22E23282}":
+                        return True
+            except (FileNotFoundError, OSError):
+                continue
+        return False
+
     def add_pin_to_start(self):
-        try:
-            key_path = r'SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen'
-            winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "{470C0EBD-5D73-4d58-9CED-E91E22E23282}")
-            self.update_menu_items_status()
-        except PermissionError:
-            if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHINE, key_path):
-                if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
-                    try:
-                        winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "{470C0EBD-5D73-4d58-9CED-E91E22E23282}")
-                        self.update_menu_items_status()
-                    except:
-                        messagebox.showerror("Ошибка", "Не удалось добавить пункт 'Закрепить на начальном экране'")
-                else:
-                    messagebox.showerror("Ошибка", "Не удалось установить права доступа")
-            else:
-                messagebox.showerror("Ошибка", "Не удалось получить владение ключом реестра")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {str(e)}")
+        paths = (
+            r'SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen',
+            r'SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen',
+        )
+        ok = 0
+        for key_path in paths:
+            try:
+                winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                                    winreg.KEY_SET_VALUE) as key:
+                    winreg.SetValueEx(key, "", 0, winreg.REG_SZ,
+                                      "{470C0EBD-5D73-4d58-9CED-E91E22E23282}")
+                ok += 1
+            except PermissionError:
+                if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHINE, key_path):
+                    if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
+                        try:
+                            winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+                            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0,
+                                                winreg.KEY_SET_VALUE) as key:
+                                winreg.SetValueEx(key, "", 0, winreg.REG_SZ,
+                                                  "{470C0EBD-5D73-4d58-9CED-E91E22E23282}")
+                            ok += 1
+                        except:
+                            pass
+            except Exception:
+                pass
+        self.update_menu_items_status()
+        if ok == 0:
+            messagebox.showerror("Ошибка", "Не удалось добавить пункт 'Закрепить на начальном экране'")
 
     def remove_pin_to_start(self):
-        try:
-            key_path = r'SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen'
-            winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
-            self.update_menu_items_status()
-        except FileNotFoundError:
-            self.update_menu_items_status()
-        except PermissionError:
-            if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHINE, key_path):
-                if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
-                    try:
-                        self.delete_registry_key_recursive(winreg.HKEY_LOCAL_MACHINE, key_path)
-                        self.update_menu_items_status()
-                    except:
-                        messagebox.showerror("Ошибка", "Не удалось удалить пункт 'Закрепить на начальном экране'")
-                else:
-                    messagebox.showerror("Ошибка", "Не удалось установить права доступа")
-            else:
-                messagebox.showerror("Ошибка", "Не удалось получить владение ключом реестра")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
+        paths = (
+            r'SOFTWARE\Classes\exefile\shellex\ContextMenuHandlers\PintoStartScreen',
+            r'SOFTWARE\Classes\Folder\shellex\ContextMenuHandlers\PintoStartScreen',
+        )
+        for key_path in paths:
+            try:
+                winreg.DeleteKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            except FileNotFoundError:
+                pass
+            except PermissionError:
+                if self.take_ownership_registry_key(winreg.HKEY_LOCAL_MACHINE, key_path):
+                    if self.set_registry_key_permissions(winreg.HKEY_LOCAL_MACHINE, key_path):
+                        try:
+                            self.delete_registry_key_recursive(winreg.HKEY_LOCAL_MACHINE, key_path)
+                        except:
+                            pass
+            except Exception:
+                pass
+        self.update_menu_items_status()
 
     def add_pin_to_taskbar(self):
         try:
@@ -2118,15 +2173,14 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {str(e)}")
 
-    # ---- AppX (Photos): «Изменить с помощью Фотографии» и «Создать новое видео» ----
+    # ---- Универсальный helper для скрытия через ProgrammaticAccessOnly ----
 
-    def _hide_appx_for_user(self, kind):
-        path = _appx_hkcu_path(kind)
-        if not path:
-            return False
+    def _hide_key_pao(self, hkcu_path):
+        """Создаёт HKCU-ключ и записывает ProgrammaticAccessOnly=''.
+        Универсальный helper для всех пунктов, скрываемых через PAO."""
         try:
-            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
+            winreg.CreateKey(winreg.HKEY_CURRENT_USER, hkcu_path)
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, hkcu_path, 0,
                                 winreg.KEY_SET_VALUE) as key:
                 winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
                                   winreg.REG_SZ, "")
@@ -2134,45 +2188,58 @@ class DesktopMenuTab:
         except Exception:
             return False
 
+    def _unhide_key_pao(self, hkcu_path):
+        """Удаляет ProgrammaticAccessOnly; если в ключе больше ничего нет —
+        удаляет сам ключ. Используется для pintohome/powershell/print/photos."""
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, hkcu_path, 0,
+                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        try:
+            num_values = winreg.QueryInfoKey(key)[1]
+            only_pao = False
+            if num_values == 1:
+                try:
+                    winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
+                    only_pao = True
+                except FileNotFoundError:
+                    pass
+            if only_pao:
+                key.Close()
+                try:
+                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, hkcu_path)
+                except OSError:
+                    pass
+            else:
+                try:
+                    winreg.DeleteValue(key, "ProgrammaticAccessOnly")
+                except FileNotFoundError:
+                    pass
+                key.Close()
+            return True
+        except Exception:
+            try:
+                key.Close()
+            except Exception:
+                pass
+            return False
+
+    # ---- AppX (Photos) ----
+
+    def _hide_appx_for_user(self, kind):
+        path = _appx_hkcu_path(kind)
+        if not path:
+            return False
+        return self._hide_key_pao(path)
+
     def _unhide_appx_for_user(self, kind):
         path = _appx_hkcu_path(kind)
         if not path:
             return False
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
-            try:
-                num_values = winreg.QueryInfoKey(key)[1]
-                only_pao = False
-                if num_values == 1:
-                    try:
-                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
-                        only_pao = True
-                    except FileNotFoundError:
-                        pass
-                if only_pao:
-                    key.Close()
-                    try:
-                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
-                    except OSError:
-                        pass
-                else:
-                    try:
-                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
-                    except FileNotFoundError:
-                        pass
-                    key.Close()
-            except Exception:
-                try:
-                    key.Close()
-                except Exception:
-                    pass
-                raise
-            return True
-        except FileNotFoundError:
-            return True
-        except Exception:
-            return False
+        return self._unhide_key_pao(path)
 
     def add_photos_edit(self):
         try:
@@ -2202,23 +2269,14 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
 
-    # ---- «Сделать фоном рабочего стола» (ProgrammaticAccessOnly в HKCU) ----
+    # ---- Wallpaper ----
 
     @staticmethod
     def _wallpaper_hkcu_path(ext):
         return f"Software\\Classes\\SystemFileAssociations\\.{ext}\\Shell\\setdesktopwallpaper"
 
     def _hide_wallpaper_for_user(self, ext):
-        try:
-            path = self._wallpaper_hkcu_path(ext)
-            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
-                                  winreg.REG_SZ, "")
-            return True
-        except Exception:
-            return False
+        return self._hide_key_pao(self._wallpaper_hkcu_path(ext))
 
     def _unhide_wallpaper_for_user(self, ext):
         try:
@@ -2255,57 +2313,13 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
 
-    # ---- «Печать» (ProgrammaticAccessOnly в HKCU, комбинированный подход) ----
+    # ---- Print ----
 
     def _hide_print_for_user(self, base):
-        try:
-            path = _print_hkcu_path(base)
-            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
-                                  winreg.REG_SZ, "")
-            return True
-        except Exception:
-            return False
+        return self._hide_key_pao(_print_hkcu_path(base))
 
     def _unhide_print_for_user(self, base):
-        path = _print_hkcu_path(base)
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
-            try:
-                num_values = winreg.QueryInfoKey(key)[1]
-                only_pao = False
-                if num_values == 1:
-                    try:
-                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
-                        only_pao = True
-                    except FileNotFoundError:
-                        pass
-                if only_pao:
-                    key.Close()
-                    try:
-                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
-                    except OSError:
-                        pass
-                else:
-                    try:
-                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
-                    except FileNotFoundError:
-                        pass
-                    key.Close()
-            except Exception:
-                try:
-                    key.Close()
-                except Exception:
-                    pass
-                raise
-            return True
-        except FileNotFoundError:
-            return True
-        except Exception:
-            return False
+        return self._unhide_key_pao(_print_hkcu_path(base))
 
     def add_print(self):
         try:
@@ -2335,61 +2349,48 @@ class DesktopMenuTab:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
 
-    # ---- «Открыть окно PowerShell здесь» (ProgrammaticAccessOnly в HKCU) ----
+    # ---- pintohome ----
+
+    def _hide_pintohome_for_user(self, base):
+        return self._hide_key_pao(_pintohome_hkcu_path(base))
+
+    def _unhide_pintohome_for_user(self, base):
+        return self._unhide_key_pao(_pintohome_hkcu_path(base))
+
+    def add_pintohome(self):
+        try:
+            for base in PINTOHOME_CLASSES:
+                self._unhide_pintohome_for_user(base)
+            self.update_menu_items_status()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при добавлении пункта: {e}")
+
+    def remove_pintohome(self):
+        try:
+            ok = 0
+            for base in PINTOHOME_CLASSES:
+                if self._hide_pintohome_for_user(base):
+                    ok += 1
+            self.update_menu_items_status()
+            if ok == 0:
+                messagebox.showerror(
+                    "Ошибка",
+                    "Не удалось скрыть пункт.\n"
+                    "Попробуйте запустить программу от имени администратора.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
+    # ---- PowerShell ----
 
     @staticmethod
     def _powershell_hkcu_path(base):
         return f"Software\\Classes\\{base}\\shell\\PowerShell"
 
     def _hide_powershell_for_user(self, base):
-        try:
-            path = self._powershell_hkcu_path(base)
-            winreg.CreateKey(winreg.HKEY_CURRENT_USER, path)
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "ProgrammaticAccessOnly", 0,
-                                  winreg.REG_SZ, "")
-            return True
-        except Exception:
-            return False
+        return self._hide_key_pao(self._powershell_hkcu_path(base))
 
     def _unhide_powershell_for_user(self, base):
-        path = self._powershell_hkcu_path(base)
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                 winreg.KEY_READ | winreg.KEY_SET_VALUE)
-            try:
-                num_values = winreg.QueryInfoKey(key)[1]
-                only_pao = False
-                if num_values == 1:
-                    try:
-                        winreg.QueryValueEx(key, "ProgrammaticAccessOnly")
-                        only_pao = True
-                    except FileNotFoundError:
-                        pass
-                if only_pao:
-                    key.Close()
-                    try:
-                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
-                    except OSError:
-                        pass
-                else:
-                    try:
-                        winreg.DeleteValue(key, "ProgrammaticAccessOnly")
-                    except FileNotFoundError:
-                        pass
-                    key.Close()
-            except Exception:
-                try:
-                    key.Close()
-                except Exception:
-                    pass
-                raise
-            return True
-        except FileNotFoundError:
-            return True
-        except Exception:
-            return False
+        return self._unhide_key_pao(self._powershell_hkcu_path(base))
 
     def add_powershell(self):
         try:
@@ -2413,6 +2414,8 @@ class DesktopMenuTab:
                     "Попробуйте запустить программу от имени администратора.")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при удалении пункта: {e}")
+
+    # ---- Остальные пункты (без изменений) ----
 
     def add_defender_scan(self):
         try:
@@ -2737,7 +2740,6 @@ class DesktopMenuTab:
             messagebox.showerror("Ошибка", "Ошибка при перезагрузке проводника")
 
     def set_default_settings(self):
-        """Сброс пунктов контекстного меню к стандартным (без окна)."""
         try:
             _invalidate_print_cache()
             for item in self.menu_item_buttons:

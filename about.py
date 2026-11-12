@@ -180,7 +180,7 @@ class AboutModule:
 
         self._section(info, "Разработка",
                       "Идея: EvKyz\nРеализация: DeepSeek AI\n"
-                      "Сборка: 11 ноября 2026\nЛицензия: MIT License",
+                      "Сборка: 12 ноября 2026\nЛицензия: MIT License",
                       font=('Arial', 8), fg='#7f8c8d', center=True)
 
         self._buttons(container)
@@ -459,7 +459,6 @@ class AboutModule:
     def _collect_explorer(self):
         s = {}
         # BitLocker: ProgrammaticAccessOnly — значение в HKCR\Drive\shell\encrypt-bde.
-        # reg.exe не понимает HKCR — используем winreg напрямую.
         try:
             with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
                                 r'Drive\shell\encrypt-bde') as k:
@@ -484,6 +483,28 @@ class AboutModule:
             r'Software\Microsoft\Windows\CurrentVersion\Policies\Explorer',
             'NoRecentDocsHistory', 'HKCU')
         s['recent_folders_enabled'] = no_recent != '0x1'
+
+        # «Запрос подтверждения на удаление» (ShellState, байт 4)
+        try:
+            from explorer import (
+                SHELLSTATE_KEY, SHELLSTATE_VALUE,
+                SHELLSTATE_CONFIRM_BYTE_INDEX, SHELLSTATE_CONFIRM_OFF,
+            )
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
+                value, vtype = winreg.QueryValueEx(key, SHELLSTATE_VALUE)
+                if (vtype == winreg.REG_BINARY
+                        and isinstance(value, (bytes, bytearray))
+                        and len(value) >= SHELLSTATE_CONFIRM_BYTE_INDEX + 1):
+                    s['delete_confirm_enabled'] = (
+                        value[SHELLSTATE_CONFIRM_BYTE_INDEX] != SHELLSTATE_CONFIRM_OFF
+                    )
+                else:
+                    s['delete_confirm_enabled'] = True
+        except (FileNotFoundError, OSError):
+            s['delete_confirm_enabled'] = True
+        except Exception as e:
+            self._log(f"  ОШИБКА сбора delete_confirm: {e}")
+            s['delete_confirm_enabled'] = True
 
         try:
             from explorer import IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE
@@ -637,14 +658,6 @@ class AboutModule:
         - (None, True) — imaster-иконки есть, но DLL не найдена нигде → пропускаем
           desktop/disk.
         - (path, True) — путь найден/скопирован → применяем desktop/disk.
-
-        Логика:
-        - Если путь уже сохранён в реестре и валиден — используем его без диалога.
-        - Если в этой сессии уже предлагали копирование — используем recommended_path.
-        - Иначе делаем свежую проверку DLL в папке exe / System32 / др.
-          (не полагаемся на dll_info — он мог устареть, если DLL появилась после старта).
-        - Если DLL физически есть — предлагаем скопировать в System32 (диалог).
-        - Если DLL физически нет — пропускаем desktop/disk.
         """
         has_imaster = self._ini_has_imaster_icons(config)
         if not has_imaster:
@@ -656,27 +669,22 @@ class AboutModule:
         except ImportError:
             return None, True
 
-        # 1) Путь уже сохранён в реестре и валиден — используем без диалога.
         saved = DLLChecker.get_dll_path_from_registry()
         if saved and os.path.isfile(saved):
             h = calculate_sha1(saved)
             if h and h in VALID_HASHES:
                 return saved, True
 
-        # 2) В этой сессии уже предлагали копирование — используем recommended_path.
         if DLLChecker.copy_offered:
             status = DLLChecker.get_dll_status()
             return status.get('recommended_path'), True
 
-        # 3) Свежая проверка: есть ли DLL в папке exe / System32 / других местах.
         base = sys._MEIPASS if getattr(sys, 'frozen', False) \
             else os.path.dirname(os.path.abspath(__file__))
         fresh = DLLCheckerInternal(base).check_imaster_dll()
         if not fresh.get('dll_found') or not fresh.get('hash_match'):
-            # DLL физически нет — пропускаем desktop/disk
             return None, True
 
-        # DLL есть, но путь не сохранён → предлагаем копирование в System32
         path = DLLChecker.offer_copy_to_system32(self.parent, "desktop")
         return path, True
 
@@ -975,6 +983,19 @@ class AboutModule:
                 else:
                     self._log(f"  recent_folders_enabled: без изменений ({tgt})")
 
+            if 'delete_confirm_enabled' in ex:
+                tgt = _target('delete_confirm_enabled')
+                if tgt != e.delete_confirm_enabled:
+                    e.toggle_delete_confirm()
+                    if e.delete_confirm_enabled == tgt:
+                        self._log(f"  delete_confirm_enabled: -> {tgt} (OK)")
+                        applied += 1
+                    else:
+                        self._log("  delete_confirm_enabled: не удалось применить")
+                        failed += 1
+                else:
+                    self._log(f"  delete_confirm_enabled: без изменений ({tgt})")
+
             if 'image_details_hidden' in ex:
                 tgt = _target('image_details_hidden')
                 supported = getattr(e, 'image_details_supported', False)
@@ -1170,6 +1191,7 @@ class AboutModule:
             applied = 0
             skipped = 0
             not_found = 0
+            unsupported = 0
             for key, state in config['contextmenu'].items():
                 target = state.lower() == 'true'
                 menu_name = ITEM_NAME_BY_KEY.get(key, key)
@@ -1178,6 +1200,11 @@ class AboutModule:
                     item = btn_info['data']
                     if item['name'] == menu_name:
                         found = True
+                        supported_check = item.get('supported_check')
+                        if supported_check is not None and not supported_check():
+                            self._log(f"  {key}: пропущено (не поддерживается на этой версии)")
+                            unsupported += 1
+                            break
                         cur = item['check_command']()
                         if cur != target:
                             (item['add_command'] if target else item['remove_command'])()
@@ -1192,7 +1219,8 @@ class AboutModule:
                     not_found += 1
             temp.destroy()
             self._log(f"  Итог contextmenu: применено {applied}, "
-                      f"без изменений {skipped}, не найдено {not_found}")
+                      f"без изменений {skipped}, не найдено {not_found}, "
+                      f"не поддерживается {unsupported}")
         except Exception as e:
             self._log(f"  ОШИБКА contextmenu: {e}")
 
@@ -1532,6 +1560,10 @@ class AboutModule:
             if not e.recent_folders_enabled:
                 e.toggle_recent_folders()
 
+            # «Запрос подтверждения на удаление» будет перезаписан эталонным
+            # ShellState в самом конце reset_all_settings (после первого
+            # restart_explorer + запись ShellState + второй restart_explorer).
+
             if getattr(e, 'image_details_supported', False):
                 if getattr(e, 'image_details_hidden', False):
                     e.toggle_image_details()
@@ -1605,6 +1637,37 @@ class AboutModule:
             errors.append(f"sendto: {e}")
 
         self._restart_explorer_silent()
+
+        # Полная перезапись ShellState эталонным массивом с confirm=OFF (0x37).
+        # Первый restart_explorer — чтобы Explorer не затёр байт кэшем при
+        # завершении. Затем пишем ShellState. Затем второй restart_explorer —
+        # чтобы Explorer перечитал новое значение ShellState.
+        try:
+            from explorer import (
+                SHELLSTATE_KEY, SHELLSTATE_VALUE, SHELLSTATE_CONFIRM_OFF,
+            )
+            time.sleep(0.3)
+            default_data = bytearray((
+                0x24, 0x00, 0x00, 0x00,
+                0x00, 0x28, 0x00, 0x00,  # байт 4 будет перезаписан ниже
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x00, 0x00,
+                0x13, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00,
+                0x62, 0x00, 0x00, 0x00,
+            ))
+            default_data[4] = SHELLSTATE_CONFIRM_OFF
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
+                winreg.SetValueEx(key, SHELLSTATE_VALUE, 0,
+                                  winreg.REG_BINARY, bytes(default_data))
+
+            # Второй перезапуск — Explorer перечитает ShellState.
+            time.sleep(0.3)
+            self._restart_explorer_silent()
+        except Exception as e:
+            errors.append(f"delete_confirm final: {e}")
 
         if errors:
             messagebox.showwarning("Сброс завершён с ошибками", "\n".join(errors[:5]))

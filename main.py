@@ -242,7 +242,7 @@ class DLLCheckerInternal:
 class InterfaceMaster:
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v2.2 (Dev)")
+        self.root.title("Interface Master v2.2")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -262,7 +262,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "2.2.0.204"
+        self.version = "2.2.3.215"
         self.logo_photo = None
         self.modules_loaded = self._load_modules()
         self.current_module_instance = None

@@ -23,6 +23,7 @@ class Module:
         self.shortcut_text_choice = tk.IntVar(value=0)
         self._status_timer = None
         self._create_widgets()
+        self._load_current_state()
         self.show()
 
     def _create_widgets(self):
@@ -64,6 +65,40 @@ class Module:
                                       font=('Arial', 9), foreground='#27ae60',
                                       wraplength=400, justify=tk.CENTER)
         self.status_label.pack(pady=5)
+
+    def _load_current_state(self):
+        """Выставляет radiobutton в соответствии с текущими настройками реестра."""
+        # Стрелки ярлыков
+        arrow_choice = 1
+        try:
+            r = _reg('query', SHELL_ICONS, '/v', '29')
+            if r.returncode == 0 and 'REG_SZ' in r.stdout:
+                parts = r.stdout.split('REG_SZ', 1)
+                value = parts[1].strip() if len(parts) > 1 else ''
+                if value == '':
+                    arrow_choice = 3
+                elif 'shell32.dll,-30' in value:
+                    arrow_choice = 2
+                else:
+                    arrow_choice = 1
+        except Exception:
+            arrow_choice = 1
+        self.arrow_choice.set(arrow_choice)
+
+        # Текст ярлыков
+        text_choice = 1
+        try:
+            r = _reg('query', NAMING_TEMPLATES, '/v', 'ShortcutNameTemplate')
+            if r.returncode == 0 and 'REG_SZ' in r.stdout:
+                parts = r.stdout.split('REG_SZ', 1)
+                value = parts[1].strip() if len(parts) > 1 else ''
+                if '%s.lnk' in value and '— ярлык' not in value:
+                    text_choice = 2
+                else:
+                    text_choice = 1
+        except Exception:
+            text_choice = 1
+        self.shortcut_text_choice.set(text_choice)
 
     @staticmethod
     def _delete_value_if_exists(key_path, value_name):

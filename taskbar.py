@@ -6,7 +6,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-
+_WIN_VERSION_CACHE = None
+_WIN_EDITION_CACHE = None
 
 def _run(args, **kwargs):
     kwargs.setdefault("creationflags", CREATE_NO_WINDOW)
@@ -17,12 +18,16 @@ def _run(args, **kwargs):
 
 def get_windows_version():
     """Возвращает полную версию Windows в формате major.minor.build.revision."""
+    global _WIN_VERSION_CACHE
+    if _WIN_VERSION_CACHE is not None:
+        return _WIN_VERSION_CACHE
     try:
         r = _run(['wmic', 'os', 'get', 'Version', '/value'],
                  capture_output=True, text=True, encoding='cp866')
         m = re.search(r'Version=(\d+\.\d+\.\d+\.\d+)', r.stdout)
         if m:
-            return m.group(1)
+            _WIN_VERSION_CACHE = m.group(1)
+            return _WIN_VERSION_CACHE
     except Exception:
         pass
     try:
@@ -44,10 +49,12 @@ def get_windows_version():
                     rev = int(ubr.group(1), 16)
             except Exception:
                 pass
-            return f"10.0.{build}.{rev}"
+            _WIN_VERSION_CACHE = f"10.0.{build}.{rev}"
+            return _WIN_VERSION_CACHE
     except Exception:
         pass
-    return "10.0.0.0"
+    _WIN_VERSION_CACHE = "10.0.0.0"
+    return _WIN_VERSION_CACHE
 
 
 def get_build_number(version=None):
@@ -71,15 +78,20 @@ def get_revision_number(version=None):
 
 def get_edition_id():
     """Возвращает EditionID из реестра (Enterprise, EnterpriseS, Professional и т.д.)."""
+    global _WIN_EDITION_CACHE
+    if _WIN_EDITION_CACHE is not None:
+        return _WIN_EDITION_CACHE
     try:
         r = _run(['reg', 'query',
                   'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
                   '/v', 'EditionID'],
                  capture_output=True, text=True, encoding='cp866')
         m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
-        return m.group(1) if m else ''
+        _WIN_EDITION_CACHE = m.group(1) if m else ''
+        return _WIN_EDITION_CACHE
     except Exception:
-        return ''
+        _WIN_EDITION_CACHE = ''
+        return _WIN_EDITION_CACHE
 
 
 def is_enterprise():

@@ -76,7 +76,6 @@ _WIN_BUILD_CACHE = None
 
 
 def _get_windows_build():
-    """Возвращает build-номер Windows (например, 19045). 0 при ошибке."""
     try:
         parts = platform.version().split('.')
         if len(parts) >= 3:
@@ -94,13 +93,15 @@ def _win_build():
 
 
 def _is_windows_1903_or_later():
-    """True для Windows 10 1903 (build 18362) и новее (включая Windows 11)."""
     return _win_build() >= 18362
 
 
 FILE_NAMES = {
-    '.folder': 'Папка', '.bmp': 'Рисунок BMP', '.contact': 'Контакт',
-    '.lnk': 'Ярлык', '.rtf': 'Документ RTF', '.txt': 'Текстовый документ',
+    '.bmp': 'Рисунок BMP',
+    '.contact': 'Контакт',
+    '.lnk': 'Ярлык',
+    '.rtf': 'Документ RTF',
+    '.txt': 'Текстовый документ',
     '.zip': 'Архив ZIP',
 }
 
@@ -113,12 +114,9 @@ TARGET_EXTENSIONS = {
     '.zip': r'SOFTWARE\Classes\.zip\CompressedFolder\ShellNew',
 }
 
-# Расширения, которые скрываются полностью на Windows 10 1903+ (build >= 18362).
-# В реестре они могут присутствовать, но Microsoft перестала показывать их
-# в контекстном меню «Создать» начиная с этих версий.
 HIDDEN_SINCE_1903 = {'.contact'}
 
-# ---------- Работа с MS-расширениями и офисными клиентами ----------
+# ---------- Офисные клиенты ----------
 
 MS_EXTENSIONS = {
     '.docx': 'Документ Word',
@@ -187,11 +185,6 @@ def _find_shellnew_under_ext(hive, ext):
 
 
 def _classify_provider(class_name, ext):
-    """Возвращает (provider_id, display_name, vendor).
-
-    Для Microsoft vendor = '' (в UI не показываем).
-    Для сторонних vendor = имя клиента.
-    """
     low = class_name.lower()
 
     for base_cls in MS_CLASSES.get(ext, []):
@@ -294,7 +287,6 @@ class CreateNewModule:
         try:
             hidden_1903 = _is_windows_1903_or_later()
 
-            # Folder
             if _reg_exists(HKCR, r'Folder\ShellNew'):
                 items.append({"name": "Папка", "enabled": True,
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
@@ -306,7 +298,6 @@ class CreateNewModule:
                               "hive": HKCR, "base_path": r'Folder\ShellNew'})
 
             for ext, path in TARGET_EXTENSIONS.items():
-                # Пропускаем пункты, скрытые на 1903+
                 if hidden_1903 and ext in HIDDEN_SINCE_1903:
                     continue
 
@@ -327,12 +318,6 @@ class CreateNewModule:
         return items
 
     def _get_office_items(self):
-        """Только реально установленные офисные клиенты, перехватившие MS-форматы.
-
-        Перебирает подветки ShellNew под .docx/.xlsx/.pptx/.pub в HKLM и HKCU.
-        Провайдер определяется по имени класса. Дубликаты (один provider_id + ext)
-        схлопываются — приоритет HKLM.
-        """
         items = []
         seen = set()
 
@@ -388,19 +373,34 @@ class CreateNewModule:
             try:
                 if path.endswith('_no'):
                     _rename_key(hive, path, path[:-3])
+                    # Проверяем, что переименование действительно сработало
+                    if not _reg_exists(hive, path[:-3]):
+                        messagebox.showwarning(
+                            "Не удалось",
+                            f"Не хватает прав для изменения {path}.\n"
+                            f"Запустите программу от имени администратора."
+                        )
                 elif not _reg_exists(hive, path):
                     _ensure_shellnew(hive, os.path.dirname(path))
-            except Exception:
-                pass
+            except Exception as e:
+                messagebox.showwarning(
+                    "Ошибка", f"Не удалось включить {item['name']}: {e}")
             return
         hive, base = item["hive"], item["base_path"]
         try:
             if _reg_exists(hive, base + '_no'):
                 _rename_key(hive, base + '_no', base)
+                if not _reg_exists(hive, base):
+                    messagebox.showwarning(
+                        "Не удалось",
+                        f"Не хватает прав для изменения {base}.\n"
+                        f"Запустите программу от имени администратора."
+                    )
             elif not _reg_exists(hive, base):
                 _ensure_shellnew(hive, base)
-        except Exception:
-            pass
+        except Exception as e:
+            messagebox.showwarning(
+                "Ошибка", f"Не удалось включить {item['name']}: {e}")
 
     def _disable(self, item):
         shellnew = item.get("shellnew")
@@ -409,12 +409,26 @@ class CreateNewModule:
             try:
                 if not path.endswith('_no') and _reg_exists(hive, path):
                     _rename_key(hive, path, path + '_no')
-            except Exception:
-                pass
+                    if _reg_exists(hive, path):
+                        messagebox.showwarning(
+                            "Не удалось",
+                            f"Не хватает прав для изменения {path}.\n"
+                            f"Запустите программу от имени администратора."
+                        )
+            except Exception as e:
+                messagebox.showwarning(
+                    "Ошибка", f"Не удалось отключить {item['name']}: {e}")
             return
         hive, base = item["hive"], item["base_path"]
         try:
             if _reg_exists(hive, base):
                 _rename_key(hive, base, base + '_no')
-        except Exception:
-            pass
+                if _reg_exists(hive, base):
+                    messagebox.showwarning(
+                        "Не удалось",
+                        f"Не хватает прав для изменения {base}.\n"
+                        f"Запустите программу от имени администратора."
+                    )
+        except Exception as e:
+            messagebox.showwarning(
+                "Ошибка", f"Не удалось отключить {item['name']}: {e}")

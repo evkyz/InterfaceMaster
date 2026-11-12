@@ -1,8 +1,10 @@
 import os
 import re
+import struct
 import subprocess
 import sys
 import tkinter as tk
+import winreg
 from tkinter import ttk, messagebox
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
@@ -20,6 +22,20 @@ FOLDERS = {
 NAMESPACE_KEY = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace"
 IMAGE_DETAILS_VALUE = "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}"
 IMAGE_DETAILS_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"
+
+TYPED_PATHS_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"
+
+# ShellState — REG_BINARY, 36 байт (9 DWORD).
+# Байт 4 (младший байт DWORD[1], little-endian):
+#   0x33 — подтверждение стоит;
+#   0x37 — подтверждение снято.
+# Остальные 35 байт содержат другие флаги проводника и сохраняются как есть.
+SHELLSTATE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer"
+SHELLSTATE_VALUE = "ShellState"
+SHELLSTATE_CONFIRM_BYTE_INDEX = 4
+SHELLSTATE_CONFIRM_ON = 0x33
+SHELLSTATE_CONFIRM_OFF = 0x37
+SHELLSTATE_SIZE = 36
 
 PHOTO_VIEWER_EXTS = {
     '.jpg': 'PhotoViewer.FileAssoc.Jpeg',
@@ -61,6 +77,7 @@ class ExplorerModule:
         self.photo_viewer_enabled = False
         self.file_ext_enabled = False
         self.recent_folders_enabled = True
+        self.delete_confirm_enabled = True
         self.image_details_hidden = False
         self.image_details_supported = False
         self.status_labels = {}
@@ -96,31 +113,35 @@ class ExplorerModule:
 
     # ---- helpers ----
     @staticmethod
-    def _is_windows_10_22h2_plus():
+    def _get_windows_build():
+        """Build-номер Windows. Основной источник — реестр (CurrentBuildNumber),
+        затем sys.getwindowsversion(), затем platform.version()."""
         try:
-            r = _run_reg('query', r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion',
-                         '/v', 'CurrentBuildNumber')
-            if r.returncode == 0:
-                for line in r.stdout.splitlines():
-                    if 'CurrentBuildNumber' in line:
-                        build = int(line.split('REG_SZ')[1].strip())
-                        return 19045 <= build < 22000
-        except Exception:
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, 'CurrentBuildNumber')
+                return int(value)
+        except (FileNotFoundError, OSError, ValueError, TypeError):
             pass
         try:
-            v = sys.getwindowsversion()
-            return v.major == 10 and 19045 <= v.build < 22000
+            return sys.getwindowsversion().build
         except Exception:
             pass
         try:
             import platform
             parts = platform.version().split('.')
             if len(parts) >= 3:
-                build = int(parts[2])
-                return 19045 <= build < 22000
+                return int(parts[2])
         except Exception:
             pass
-        return False
+        return 0
+
+    def _is_image_details_supported(self):
+        """Дополнительные сведения об изображении: Windows 10 22H2 (19045)
+        и Windows 11 (22000+)."""
+        return self._get_windows_build() >= 19045
 
     def _add_tooltip(self, widget, text):
         state = {'tip': None}
@@ -162,11 +183,15 @@ class ExplorerModule:
         ttk.Button(f, text="Папки в Этот компьютер",
                    command=self._show_folders_screen, width=35).pack(pady=10)
 
-        clear_btn = ttk.Button(f, text="Очистка истории",
-                               command=self.clear_typed_paths, width=35)
-        clear_btn.pack(pady=(0, 10))
-        self._add_tooltip(clear_btn, "Для выборочного удаления зажмите Shift")
+        clear_btn = ttk.Button(
+            f,
+            text="Очистка истории",
+            command=self.clear_typed_paths,
+            width=35,
+        )
+        clear_btn.pack(pady=10)
         clear_btn.bind("<Shift-Button-1>", self._on_clear_history_shift_click)
+        self._add_tooltip(clear_btn, "Для выборочного удаления зажмите Shift")
 
         ttk.Separator(f, orient='horizontal').pack(fill=tk.X, pady=20)
 
@@ -185,7 +210,12 @@ class ExplorerModule:
                                  self.toggle_recent_folders)
         ttk.Separator(f, orient='horizontal').pack(fill=tk.X, pady=20)
 
-        # Image details
+        self._add_toggle_section(f, "Запрос подтверждения на удаление (для корзины):",
+                                 "delete_confirm_status", "delete_confirm_btn",
+                                 self.toggle_delete_confirm)
+
+        ttk.Separator(f, orient='horizontal').pack(fill=tk.X, pady=20)
+
         frame = ttk.Frame(f)
         frame.pack(fill=tk.X, pady=5)
         ttk.Label(frame,
@@ -198,11 +228,11 @@ class ExplorerModule:
                                             command=self.toggle_image_details, width=35)
         self.image_details_btn.pack()
 
-        self.image_details_supported = self._is_windows_10_22h2_plus()
+        self.image_details_supported = self._is_image_details_supported()
         if not self.image_details_supported:
             self.image_details_btn.config(state=tk.DISABLED)
             self._add_tooltip(self.image_details_btn,
-                              "Эта функция доступна только в Windows 10 22H2")
+                              "Эта функция доступна в Windows 10 22H2 и Windows 11")
 
     def _add_toggle_section(self, parent, label, status_attr, btn_attr, command):
         frame = ttk.Frame(parent)
@@ -295,6 +325,7 @@ class ExplorerModule:
         self._check_photo_viewer_state()
         self._check_file_ext_state()
         self._check_recent_folders_state()
+        self._check_delete_confirm_state()
         self._check_image_details_state()
 
     def _check_folders_state(self):
@@ -307,9 +338,6 @@ class ExplorerModule:
                 foreground='#27ae60' if ok else '#e74c3c')
 
     def _check_bitlocker_state(self):
-        """BitLocker скрыт, если ProgrammaticAccessOnly есть в ключе encrypt-bde.
-        Ключ encrypt-bde-elev — вспомогательный (для запроса UAC), его наличие
-        не обязательно для определения видимости пункта в меню."""
         try:
             r1 = _run_reg('query', r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde',
                           '/v', 'ProgrammaticAccessOnly')
@@ -419,12 +447,96 @@ class ExplorerModule:
                                               foreground='#e67e22')
             self.recent_folders_btn.config(text="Ошибка проверки")
 
+    # ---- ShellState (запрос подтверждения на удаление) ----
+    @staticmethod
+    def _read_shellstate_bytes():
+        """Возвращает bytearray из ShellState (REG_BINARY) или None при отсутствии/ошибке."""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
+                value, vtype = winreg.QueryValueEx(key, SHELLSTATE_VALUE)
+                if vtype != winreg.REG_BINARY or not isinstance(value, (bytes, bytearray)):
+                    return None
+                return bytearray(value)
+        except (FileNotFoundError, OSError):
+            return None
+
+    @staticmethod
+    def _default_shellstate_bytes(confirm_enabled=True):
+        """Эталонный ShellState (36 байт) с нужным состоянием байта 4."""
+        data = bytearray((
+            0x24, 0x00, 0x00, 0x00,
+            0x00, 0x28, 0x00, 0x00,   # байт 4 будет перезаписан ниже
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00,
+            0x13, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+            0x62, 0x00, 0x00, 0x00,
+        ))
+        data[SHELLSTATE_CONFIRM_BYTE_INDEX] = (
+            SHELLSTATE_CONFIRM_ON if confirm_enabled else SHELLSTATE_CONFIRM_OFF
+        )
+        return data
+
+    def _check_delete_confirm_state(self):
+        """Читает ShellState и определяет, стоит ли галочка «Запрос подтверждения»."""
+        try:
+            data = self._read_shellstate_bytes()
+            if data is None or len(data) < SHELLSTATE_SIZE:
+                self.delete_confirm_enabled = True
+                self.delete_confirm_status.config(
+                    text="Состояние: включен (запрос подтверждения)",
+                    foreground='#27ae60')
+                self.delete_confirm_btn.config(text="Отключить запрос")
+                return
+
+            confirm_enabled = data[SHELLSTATE_CONFIRM_BYTE_INDEX] != SHELLSTATE_CONFIRM_OFF
+            self.delete_confirm_enabled = confirm_enabled
+            if confirm_enabled:
+                self.delete_confirm_status.config(
+                    text="Состояние: включен (запрос подтверждения)",
+                    foreground='#27ae60')
+                self.delete_confirm_btn.config(text="Отключить запрос")
+            else:
+                self.delete_confirm_status.config(
+                    text="Состояние: отключен (удаление без подтверждения)",
+                    foreground='#e74c3c')
+                self.delete_confirm_btn.config(text="Включить запрос")
+        except Exception:
+            self.delete_confirm_status.config(text="Состояние: ошибка проверки",
+                                              foreground='#e67e22')
+            self.delete_confirm_btn.config(text="Ошибка проверки")
+
+    def toggle_delete_confirm(self):
+        """Переключает только байт 4 ShellState (0x33 ↔ 0x37); остальные
+        35 байт (другие флаги проводника) сохраняются как есть."""
+        try:
+            self._check_delete_confirm_state()  # синхронизировать с реестром
+            new_confirm = not self.delete_confirm_enabled
+
+            data = self._read_shellstate_bytes()
+            if data is None or len(data) < SHELLSTATE_SIZE:
+                data = self._default_shellstate_bytes(confirm_enabled=new_confirm)
+            else:
+                data[SHELLSTATE_CONFIRM_BYTE_INDEX] = (
+                    SHELLSTATE_CONFIRM_ON if new_confirm else SHELLSTATE_CONFIRM_OFF
+                )
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
+                winreg.SetValueEx(key, SHELLSTATE_VALUE, 0, winreg.REG_BINARY, bytes(data))
+            self._check_delete_confirm_state()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось изменить ShellState:\n{e}")
+
+    # ---- Image details ----
     def _check_image_details_state(self):
         if not self.image_details_supported:
             self.image_details_hidden = True
             self.image_details_status.config(
-                text="Состояние: отключен (значок скрыт)", foreground='#e74c3c')
-            self.image_details_btn.config(text="Включить значок")
+                text="Состояние: недоступно на этой версии Windows",
+                foreground='#95a5a6')
+            self.image_details_btn.config(text="Недоступно", state=tk.DISABLED)
             return
         try:
             r = _run_reg('query', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE)
@@ -449,24 +561,23 @@ class ExplorerModule:
     def toggle_image_details(self):
         if not self.image_details_supported:
             return
+        self._check_image_details_state()
         if self.image_details_hidden:
             _run_reg('delete', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE, '/f')
         else:
             _run_reg('add', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE,
                      '/t', 'REG_DWORD', '/d', '1', '/f')
-        self.image_details_hidden = not self.image_details_hidden
         self._check_image_details_state()
 
     def toggle_bitlocker(self):
+        # BitLocker — как в explorer1.py (reg add HKEY_CLASSES_ROOT\...)
         keys = [r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde',
                 r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde-elev']
         if self.bitlocker_enabled:
-            # Сейчас показан → скрываем: добавляем ProgrammaticAccessOnly
             for key in keys:
                 _run_reg('add', key, '/v', 'ProgrammaticAccessOnly',
                          '/t', 'REG_SZ', '/d', '', '/f')
         else:
-            # Сейчас скрыт → показываем: удаляем ProgrammaticAccessOnly
             for key in keys:
                 _run_reg('delete', key, '/v', 'ProgrammaticAccessOnly', '/f')
         self._check_bitlocker_state()
@@ -479,6 +590,7 @@ class ExplorerModule:
         self._check_photo_viewer_state()
 
     def toggle_file_ext(self):
+        self._check_file_ext_state()
         value = "1" if self.file_ext_enabled else "0"
         _run_reg('add',
                  r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
@@ -486,6 +598,7 @@ class ExplorerModule:
         self._check_file_ext_state()
 
     def toggle_recent_folders(self):
+        self._check_recent_folders_state()
         reg = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
         if self.recent_folders_enabled:
             _run_reg('add', reg, '/v', 'NoRecentDocsHistory',
@@ -559,48 +672,99 @@ class ExplorerModule:
                 text="✓" if desired else "✗",
                 foreground='#27ae60' if desired else '#e74c3c')
 
-    # ---- typed paths ----
+    # ---- typed paths (history) ----
     def _on_clear_history_shift_click(self, event):
         self._open_typed_paths_window()
         return "break"
 
-    def clear_typed_paths(self):
-        reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"
-        r = _run_reg('query', reg_path)
-        if r.returncode != 0:
-            messagebox.showinfo("Очистка истории", "История очищена")
-            return
-        names = []
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            if not line or line.startswith('HKEY'):
-                continue
-            parts = line.split()
-            if len(parts) >= 2 and parts[1] in ('REG_SZ', 'REG_EXPAND_SZ', 'REG_DWORD'):
-                names.append(parts[0])
-        for name in names:
-            _run_reg('delete', reg_path, '/v', name, '/f')
-        messagebox.showinfo("Очистка истории", "История очищена")
-
     def _read_typed_paths(self):
-        reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"
         items = []
-        r = _run_reg('query', reg_path)
-        if r.returncode != 0:
-            return items
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            if not line or line.startswith('HKEY'):
-                continue
-            parts = line.split(None, 2)
-            if len(parts) >= 3 and parts[1] in ('REG_SZ', 'REG_EXPAND_SZ'):
-                items.append((parts[0], parts[2]))
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TYPED_PATHS_KEY) as key:
+                i = 0
+                while True:
+                    try:
+                        name, value, vtype = winreg.EnumValue(key, i)
+                    except OSError:
+                        break
+                    i += 1
+                    if vtype in (winreg.REG_SZ, winreg.REG_EXPAND_SZ):
+                        items.append((name, value, vtype))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
         return items
+
+    def _delete_typed_path_value(self, name):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TYPED_PATHS_KEY,
+                                0, winreg.KEY_SET_VALUE) as key:
+                winreg.DeleteValue(key, name)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
+    def _compact_typed_paths(self):
+        items = self._read_typed_paths()
+        if not items:
+            return
+
+        def _is_url_name(n):
+            return re.match(r'^url\d+$', n, re.IGNORECASE) is not None
+
+        def _sort_key(item):
+            name = item[0]
+            m = re.match(r'^url(\d+)$', name, re.IGNORECASE)
+            if m:
+                return (0, int(m.group(1)))
+            return (1, name)
+
+        url_items = [it for it in sorted(items, key=_sort_key) if _is_url_name(it[0])]
+        if not url_items:
+            return
+
+        for name, _value, _vtype in url_items:
+            self._delete_typed_path_value(name)
+
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TYPED_PATHS_KEY,
+                                0, winreg.KEY_SET_VALUE) as key:
+                for idx, (_old_name, value, vtype) in enumerate(url_items, start=1):
+                    winreg.SetValueEx(key, f'url{idx}', 0, vtype, value)
+        except (FileNotFoundError, OSError):
+            pass
+
+    def clear_typed_paths(self):
+        items = self._read_typed_paths()
+        if not items:
+            messagebox.showinfo("Очистка истории", "История уже пуста")
+            return
+
+        failed = []
+        for name, _value, _vtype in items:
+            if not self._delete_typed_path_value(name):
+                failed.append(name)
+
+        self._compact_typed_paths()
+
+        remaining = self._read_typed_paths()
+        if failed or remaining:
+            msg = []
+            if failed:
+                msg.append(f"Не удалось удалить {len(failed)} из {len(items)} записей.")
+            if remaining:
+                msg.append(f"После очистки осталось {len(remaining)} записей.")
+            messagebox.showwarning("Очистка истории", "\n".join(msg))
+        else:
+            messagebox.showinfo("Очистка истории", "История очищена")
 
     def _open_typed_paths_window(self):
         win = tk.Toplevel(self.parent)
         win.title("Выборочная очистка истории")
-        win.geometry("340x380")
+        win.geometry("360x400")
         win.transient(self.parent)
         try:
             icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
@@ -626,12 +790,25 @@ class ExplorerModule:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         vars_list = []
-        items = self._read_typed_paths()
-        if not items:
-            ttk.Label(inner, text="История пуста.", foreground='#7f8c8d').pack(
-                anchor=tk.W, pady=5)
-        else:
-            for name, value in items:
+
+        def rebuild_list():
+            for w in inner.winfo_children():
+                w.destroy()
+            vars_list.clear()
+            items = self._read_typed_paths()
+
+            def _sort_key(item):
+                name = item[0]
+                m = re.match(r'^url(\d+)$', name, re.IGNORECASE)
+                if m:
+                    return (0, int(m.group(1)))
+                return (1, name)
+
+            if not items:
+                ttk.Label(inner, text="История пуста.",
+                          foreground='#7f8c8d').pack(anchor=tk.W, pady=5)
+                return
+            for name, value, _vtype in sorted(items, key=_sort_key):
                 row = ttk.Frame(inner)
                 row.pack(fill=tk.X, padx=5, pady=2)
                 v = tk.BooleanVar(value=False)
@@ -640,15 +817,33 @@ class ExplorerModule:
                 ttk.Label(row, text=value, font=('Arial', 9)).pack(
                     side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
 
+        rebuild_list()
+
         def delete_selected():
-            reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"
-            for name, v in vars_list:
-                if v.get():
-                    _run_reg('delete', reg_path, '/v', name, '/f')
-            win.destroy()
+            to_delete = [name for name, v in vars_list if v.get()]
+            if not to_delete:
+                messagebox.showinfo("Информация", "Ничего не выбрано")
+                return
+            failed = []
+            for name in to_delete:
+                if not self._delete_typed_path_value(name):
+                    failed.append(name)
+            if failed:
+                messagebox.showwarning(
+                    "Очистка истории",
+                    f"Не удалось удалить {len(failed)} записей."
+                )
+            self._compact_typed_paths()
+            remaining = self._read_typed_paths()
+            if remaining:
+                rebuild_list()
+            else:
+                win.destroy()
 
         btns = ttk.Frame(win)
         btns.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btns, text="Обновить", command=rebuild_list).pack(
+            side=tk.LEFT, padx=(0, 5))
         ttk.Button(btns, text="Удалить выбранные", command=delete_selected).pack(
             side=tk.LEFT)
         ttk.Button(btns, text="Закрыть", command=win.destroy).pack(side=tk.RIGHT)

@@ -1,13 +1,16 @@
 import os
 import re
-import struct
 import subprocess
-import sys
 import tkinter as tk
 import winreg
 from tkinter import ttk, messagebox
 
-CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+import logger
+from core import reg_utils, win_utils
+from core.ui_utils import add_tooltip
+
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+MOD = "explorer"
 
 FOLDERS = {
     "{f86fa3ab-70d2-4fc7-9c99-fcbf05467f3a}": ["Видео", "Папка с видео файлами"],
@@ -25,11 +28,6 @@ IMAGE_DETAILS_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Hi
 
 TYPED_PATHS_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths"
 
-# ShellState — REG_BINARY, 36 байт (9 DWORD).
-# Байт 4 (младший байт DWORD[1], little-endian):
-#   0x33 — подтверждение стоит;
-#   0x37 — подтверждение снято.
-# Остальные 35 байт содержат другие флаги проводника и сохраняются как есть.
 SHELLSTATE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Explorer"
 SHELLSTATE_VALUE = "ShellState"
 SHELLSTATE_CONFIRM_BYTE_INDEX = 4
@@ -61,11 +59,6 @@ PHOTO_VIEWER_CLASSES = [
     r'HKLM\SOFTWARE\Classes\PhotoViewer.FileAssoc.Gif',
     r'HKLM\SOFTWARE\Classes\PhotoViewer.FileAssoc.Tiff',
 ]
-
-
-def _run_reg(*args):
-    return subprocess.run(['reg', *args], capture_output=True, text=True,
-                          encoding='cp866', creationflags=CREATE_NO_WINDOW)
 
 
 class ExplorerModule:
@@ -112,65 +105,16 @@ class ExplorerModule:
         self.show()
 
     # ---- helpers ----
-    @staticmethod
-    def _get_windows_build():
-        """Build-номер Windows. Основной источник — реестр (CurrentBuildNumber),
-        затем sys.getwindowsversion(), затем platform.version()."""
-        try:
-            with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-            ) as key:
-                value, _ = winreg.QueryValueEx(key, 'CurrentBuildNumber')
-                return int(value)
-        except (FileNotFoundError, OSError, ValueError, TypeError):
-            pass
-        try:
-            return sys.getwindowsversion().build
-        except Exception:
-            pass
-        try:
-            import platform
-            parts = platform.version().split('.')
-            if len(parts) >= 3:
-                return int(parts[2])
-        except Exception:
-            pass
-        return 0
-
     def _is_image_details_supported(self):
-        """Дополнительные сведения об изображении: Windows 10 22H2 (19045)
-        и Windows 11 (22000+)."""
-        return self._get_windows_build() >= 19045
+        if logger.is_debug():
+            return True
+        return win_utils.get_build_number() >= 19045
 
     def _add_tooltip(self, widget, text):
-        state = {'tip': None}
+        add_tooltip(widget, text, font=("Arial", 9), bg="#ffffe0")
 
-        def enter(event):
-            if state['tip']:
-                return
-            try:
-                x = widget.winfo_rootx() + 20
-                y = widget.winfo_rooty() + widget.winfo_height() + 5
-                tip = tk.Toplevel(widget)
-                tip.wm_overrideredirect(True)
-                tip.wm_geometry(f"+{x}+{y}")
-                tk.Label(tip, text=text, background="#ffffe0", relief="solid",
-                         borderwidth=1, font=("Arial", 9)).pack()
-                state['tip'] = tip
-            except Exception:
-                state['tip'] = None
-
-        def leave(event):
-            if state['tip']:
-                try:
-                    state['tip'].destroy()
-                except Exception:
-                    pass
-                state['tip'] = None
-
-        widget.bind("<Enter>", enter)
-        widget.bind("<Leave>", leave)
+    def _is_admin(self):
+        return win_utils.is_admin()
 
     # ---- main menu ----
     def _create_main_menu(self):
@@ -229,7 +173,7 @@ class ExplorerModule:
         self.image_details_btn.pack()
 
         self.image_details_supported = self._is_image_details_supported()
-        if not self.image_details_supported:
+        if not self.image_details_supported and not logger.is_debug():
             self.image_details_btn.config(state=tk.DISABLED)
             self._add_tooltip(self.image_details_btn,
                               "Эта функция доступна в Windows 10 22H2 и Windows 11")
@@ -330,7 +274,7 @@ class ExplorerModule:
 
     def _check_folders_state(self):
         for guid in FOLDERS:
-            r = _run_reg('query', f"{NAMESPACE_KEY}\\{guid}")
+            r = reg_utils.reg('query', f"{NAMESPACE_KEY}\\{guid}", log=False)
             ok = r.returncode == 0
             self.checkbox_vars[guid].set(ok)
             self.status_labels[guid].config(
@@ -339,8 +283,9 @@ class ExplorerModule:
 
     def _check_bitlocker_state(self):
         try:
-            r1 = _run_reg('query', r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde',
-                          '/v', 'ProgrammaticAccessOnly')
+            r1 = reg_utils.reg('query',
+                               r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde',
+                               '/v', 'ProgrammaticAccessOnly', log=False)
             if r1.returncode == 0:
                 self.bitlocker_enabled = False
                 self.bitlocker_status.config(
@@ -360,12 +305,14 @@ class ExplorerModule:
 
     def _check_photo_viewer_state(self):
         try:
-            r1 = _run_reg('query',
-                          r'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',
-                          '/v', '.jpg')
+            r1 = reg_utils.reg(
+                'query',
+                r'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',
+                '/v', '.jpg', log=False)
             if r1.returncode == 0:
-                r2 = _run_reg('query',
-                              r'HKLM\SOFTWARE\Classes\PhotoViewer.FileAssoc.Jpeg')
+                r2 = reg_utils.reg('query',
+                                   r'HKLM\SOFTWARE\Classes\PhotoViewer.FileAssoc.Jpeg',
+                                   log=False)
                 if r2.returncode == 0:
                     self.photo_viewer_enabled = True
                     self.photo_viewer_status.config(
@@ -392,11 +339,12 @@ class ExplorerModule:
 
     def _check_file_ext_state(self):
         try:
-            r = _run_reg('query',
-                         r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-                         '/v', 'HideFileExt')
+            r = reg_utils.reg(
+                'query',
+                r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+                '/v', 'HideFileExt', log=False)
             if r.returncode == 0:
-                for line in r.stdout.split('\n'):
+                for line in (r.stdout or '').split('\n'):
                     if 'HideFileExt' in line:
                         value = line.split('REG_DWORD')[1].strip()
                         self.file_ext_enabled = value == '0x0'
@@ -420,11 +368,12 @@ class ExplorerModule:
 
     def _check_recent_folders_state(self):
         try:
-            r = _run_reg('query',
-                         r'HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer',
-                         '/v', 'NoRecentDocsHistory')
+            r = reg_utils.reg(
+                'query',
+                r'HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer',
+                '/v', 'NoRecentDocsHistory', log=False)
             if r.returncode == 0:
-                for line in r.stdout.split('\n'):
+                for line in (r.stdout or '').split('\n'):
                     if 'NoRecentDocsHistory' in line:
                         value = line.split('REG_DWORD')[1].strip()
                         self.recent_folders_enabled = value != '0x1'
@@ -447,10 +396,9 @@ class ExplorerModule:
                                               foreground='#e67e22')
             self.recent_folders_btn.config(text="Ошибка проверки")
 
-    # ---- ShellState (запрос подтверждения на удаление) ----
+    # ---- ShellState ----
     @staticmethod
     def _read_shellstate_bytes():
-        """Возвращает bytearray из ShellState (REG_BINARY) или None при отсутствии/ошибке."""
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
                 value, vtype = winreg.QueryValueEx(key, SHELLSTATE_VALUE)
@@ -462,10 +410,9 @@ class ExplorerModule:
 
     @staticmethod
     def _default_shellstate_bytes(confirm_enabled=True):
-        """Эталонный ShellState (36 байт) с нужным состоянием байта 4."""
         data = bytearray((
             0x24, 0x00, 0x00, 0x00,
-            0x00, 0x28, 0x00, 0x00,   # байт 4 будет перезаписан ниже
+            0x00, 0x28, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00,
@@ -480,7 +427,6 @@ class ExplorerModule:
         return data
 
     def _check_delete_confirm_state(self):
-        """Читает ShellState и определяет, стоит ли галочка «Запрос подтверждения»."""
         try:
             data = self._read_shellstate_bytes()
             if data is None or len(data) < SHELLSTATE_SIZE:
@@ -509,10 +455,8 @@ class ExplorerModule:
             self.delete_confirm_btn.config(text="Ошибка проверки")
 
     def toggle_delete_confirm(self):
-        """Переключает только байт 4 ShellState (0x33 ↔ 0x37); остальные
-        35 байт (другие флаги проводника) сохраняются как есть."""
         try:
-            self._check_delete_confirm_state()  # синхронизировать с реестром
+            self._check_delete_confirm_state()
             new_confirm = not self.delete_confirm_enabled
 
             data = self._read_shellstate_bytes()
@@ -523,15 +467,18 @@ class ExplorerModule:
                     SHELLSTATE_CONFIRM_ON if new_confirm else SHELLSTATE_CONFIRM_OFF
                 )
 
+            logger.log_reg(MOD, "set", SHELLSTATE_KEY, SHELLSTATE_VALUE,
+                           f"byte4={data[SHELLSTATE_CONFIRM_BYTE_INDEX]:#x}")
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, SHELLSTATE_KEY) as key:
                 winreg.SetValueEx(key, SHELLSTATE_VALUE, 0, winreg.REG_BINARY, bytes(data))
             self._check_delete_confirm_state()
         except Exception as e:
+            logger.log(f"ERROR toggle_delete_confirm: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Не удалось изменить ShellState:\n{e}")
 
     # ---- Image details ----
     def _check_image_details_state(self):
-        if not self.image_details_supported:
+        if not self.image_details_supported and not logger.is_debug():
             self.image_details_hidden = True
             self.image_details_status.config(
                 text="Состояние: недоступно на этой версии Windows",
@@ -539,8 +486,9 @@ class ExplorerModule:
             self.image_details_btn.config(text="Недоступно", state=tk.DISABLED)
             return
         try:
-            r = _run_reg('query', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE)
-            if r.returncode == 0 and IMAGE_DETAILS_VALUE in r.stdout:
+            r = reg_utils.reg('query', IMAGE_DETAILS_KEY, '/v',
+                              IMAGE_DETAILS_VALUE, log=False)
+            if r.returncode == 0 and IMAGE_DETAILS_VALUE in (r.stdout or ''):
                 match = re.search(r'REG_DWORD\s+(0x[0-9a-fA-F]+)', r.stdout)
                 if match and match.group(1).lower() == '0x1':
                     self.image_details_hidden = True
@@ -559,27 +507,26 @@ class ExplorerModule:
 
     # ---- toggles ----
     def toggle_image_details(self):
-        if not self.image_details_supported:
+        if not self.image_details_supported and not logger.is_debug():
             return
         self._check_image_details_state()
         if self.image_details_hidden:
-            _run_reg('delete', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE, '/f')
+            reg_utils.reg_delete(IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE, module=MOD)
         else:
-            _run_reg('add', IMAGE_DETAILS_KEY, '/v', IMAGE_DETAILS_VALUE,
-                     '/t', 'REG_DWORD', '/d', '1', '/f')
+            reg_utils.reg_add(IMAGE_DETAILS_KEY, IMAGE_DETAILS_VALUE,
+                              '1', 'REG_DWORD', module=MOD)
         self._check_image_details_state()
 
     def toggle_bitlocker(self):
-        # BitLocker — как в explorer1.py (reg add HKEY_CLASSES_ROOT\...)
         keys = [r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde',
                 r'HKEY_CLASSES_ROOT\Drive\shell\encrypt-bde-elev']
         if self.bitlocker_enabled:
             for key in keys:
-                _run_reg('add', key, '/v', 'ProgrammaticAccessOnly',
-                         '/t', 'REG_SZ', '/d', '', '/f')
+                reg_utils.reg_add(key, 'ProgrammaticAccessOnly', '',
+                                  'REG_SZ', module=MOD)
         else:
             for key in keys:
-                _run_reg('delete', key, '/v', 'ProgrammaticAccessOnly', '/f')
+                reg_utils.reg_delete(key, 'ProgrammaticAccessOnly', module=MOD)
         self._check_bitlocker_state()
 
     def toggle_photo_viewer(self):
@@ -592,28 +539,28 @@ class ExplorerModule:
     def toggle_file_ext(self):
         self._check_file_ext_state()
         value = "1" if self.file_ext_enabled else "0"
-        _run_reg('add',
-                 r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-                 '/v', 'HideFileExt', '/t', 'REG_DWORD', '/d', value, '/f')
+        reg_utils.reg_add(
+            r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
+            'HideFileExt', value, 'REG_DWORD', module=MOD)
         self._check_file_ext_state()
 
     def toggle_recent_folders(self):
         self._check_recent_folders_state()
-        reg = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+        key = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'
         if self.recent_folders_enabled:
-            _run_reg('add', reg, '/v', 'NoRecentDocsHistory',
-                     '/t', 'REG_DWORD', '/d', '1', '/f')
+            reg_utils.reg_add(key, 'NoRecentDocsHistory', '1',
+                              'REG_DWORD', module=MOD)
         else:
-            _run_reg('delete', reg, '/v', 'NoRecentDocsHistory', '/f')
+            reg_utils.reg_delete(key, 'NoRecentDocsHistory', module=MOD)
         self._check_recent_folders_state()
 
     def _enable_photo_viewer(self):
         base = r'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations'
         for ext, value in PHOTO_VIEWER_EXTS.items():
-            _run_reg('add', base, '/v', ext, '/t', 'REG_SZ', '/d', value, '/f')
+            reg_utils.reg_add(base, ext, value, 'REG_SZ', module=MOD)
 
         for class_key in PHOTO_VIEWER_CLASSES:
-            _run_reg('add', class_key, '/f')
+            reg_utils.reg_create_key(class_key, module=MOD)
 
         flags = {
             PHOTO_VIEWER_CLASSES[0]: [('ImageOptionFlags', '1')],
@@ -624,19 +571,19 @@ class ExplorerModule:
         }
         for key, values in flags.items():
             for name, data in values:
-                _run_reg('add', key, '/v', name, '/t', 'REG_DWORD', '/d', data, '/f')
+                reg_utils.reg_add(key, name, data, 'REG_DWORD', module=MOD)
 
         command = (r'%SystemRoot%\System32\rundll32.exe '
                    r'"%ProgramFiles%\Windows Photo Viewer\PhotoViewer.dll", '
                    r'ImageView_Fullscreen %1')
         for class_key in PHOTO_VIEWER_CLASSES:
             for sub in (r'\shell', r'\shell\open', r'\shell\open\command'):
-                _run_reg('add', class_key + sub, '/f')
-            _run_reg('add', class_key + r'\shell\open\command',
-                     '/ve', '/t', 'REG_SZ', '/d', command, '/f')
-            _run_reg('add', class_key + r'\shell\open\DropTarget',
-                     '/v', 'Clsid', '/t', 'REG_SZ',
-                     '/d', '{FFE2A43C-56B9-4bf5-9A79-CC6D4285608A}', '/f')
+                reg_utils.reg_create_key(class_key + sub, module=MOD)
+            reg_utils.reg_add(class_key + r'\shell\open\command', '',
+                              command, 'REG_SZ', module=MOD)
+            reg_utils.reg_add(class_key + r'\shell\open\DropTarget', 'Clsid',
+                              '{FFE2A43C-56B9-4bf5-9A79-CC6D4285608A}',
+                              'REG_SZ', module=MOD)
 
         icons = {
             PHOTO_VIEWER_CLASSES[0]: r'%SystemRoot%\System32\imageres.dll,-70',
@@ -646,28 +593,29 @@ class ExplorerModule:
             PHOTO_VIEWER_CLASSES[4]: r'%SystemRoot%\System32\wmphoto.dll,-400',
         }
         for key, icon in icons.items():
-            _run_reg('add', key + r'\DefaultIcon', '/ve',
-                     '/t', 'REG_SZ', '/d', icon, '/f')
+            reg_utils.reg_add(key + r'\DefaultIcon', '', icon,
+                              'REG_SZ', module=MOD)
 
     def _disable_photo_viewer(self):
         for ext in PHOTO_VIEWER_EXTS:
-            _run_reg('delete',
-                     r'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',
-                     '/v', ext, '/f')
-        for class_key in PHOTO_VIEWER_CLASSES + [r'HKLM\SOFTWARE\Classes\Applications\photoviewer.dll']:
-            _run_reg('delete', class_key, '/f')
-        for ext in ('.bmp', '.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff',
-                    '.wdp', '.jfif'):
-            _run_reg('delete', fr'HKCU\SOFTWARE\Classes\{ext}', '/f')
+            reg_utils.reg_delete(
+                r'HKLM\SOFTWARE\Microsoft\Windows Photo Viewer\Capabilities\FileAssociations',
+                ext, module=MOD)
+        for class_key in PHOTO_VIEWER_CLASSES + [
+                r'HKLM\SOFTWARE\Classes\Applications\photoviewer.dll']:
+            reg_utils.reg_delete(class_key, module=MOD)
+        for ext in ('.bmp', '.jpg', '.jpeg', '.png', '.gif', '.tif',
+                    '.tiff', '.wdp', '.jfif'):
+            reg_utils.reg_delete(fr'HKCU\SOFTWARE\Classes\{ext}', module=MOD)
 
     def apply_folder_changes(self):
         for guid, var in self.checkbox_vars.items():
             desired = var.get()
             reg_path = f"{NAMESPACE_KEY}\\{guid}"
             if desired:
-                _run_reg('add', reg_path, '/f')
+                reg_utils.reg_create_key(reg_path, module=MOD)
             else:
-                _run_reg('delete', reg_path, '/f')
+                reg_utils.reg_delete(reg_path, module=MOD)
             self.status_labels[guid].config(
                 text="✓" if desired else "✗",
                 foreground='#27ae60' if desired else '#e74c3c')
@@ -701,6 +649,7 @@ class ExplorerModule:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TYPED_PATHS_KEY,
                                 0, winreg.KEY_SET_VALUE) as key:
                 winreg.DeleteValue(key, name)
+            logger.log_reg(MOD, "delete", TYPED_PATHS_KEY, name)
             return True
         except FileNotFoundError:
             return True

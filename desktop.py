@@ -5,6 +5,8 @@ import winreg
 from datetime import datetime
 from tkinter import ttk, messagebox
 
+import logger
+
 try:
     from main import DLLChecker
     HAS_DLL_CHECKER = True
@@ -63,6 +65,8 @@ CONTROL_PANEL_DEFAULTS = {
 
 LIBRARIES_DEFAULT = r"C:\Windows\System32\imageres.dll,-1023"
 LIBRARIES_CLSID = r"{031E4825-7B94-4dc3-B131-E946B44C8DD5}"
+
+MOD = "desktop"
 
 
 class Module:
@@ -368,7 +372,7 @@ class Module:
     def _update_buttons_state(self):
         if self._is_destroyed:
             return
-        state = 'normal' if self.dll_path else 'disabled'
+        state = 'normal' if (self.dll_path or logger.is_debug()) else 'disabled'
         for attr in ('presets_apply_btn', 'custom_apply_btn'):
             w = getattr(self, attr, None)
             if w:
@@ -441,6 +445,7 @@ class Module:
     def _refresh_icon_cache(self):
         try:
             subprocess.run(['ie4uinit.exe', '-show'], capture_output=True, timeout=10)
+            logger.log("ie4uinit -show", module=MOD)
             return True
         except Exception:
             return False
@@ -454,6 +459,7 @@ class Module:
             subprocess.run(['ie4uinit.exe', '-ClearIconCache'],
                            capture_output=True, timeout=30)
             subprocess.run(['ie4uinit.exe', '-show'], capture_output=True, timeout=30)
+            logger.log("icon cache cleared", module=MOD)
             try:
                 ctypes.windll.user32.SystemParametersInfoW(0x0014, 0, None, 0x0002 | 0x0001)
             except Exception:
@@ -467,7 +473,6 @@ class Module:
     # ---- icon write helpers ----
 
     def _write_icon_value(self, hive, path, param_name, value):
-        """Записать значение иконки в указанный hive/path. Возвращает True/False."""
         try:
             try:
                 key = winreg.OpenKey(hive, path, 0, winreg.KEY_WRITE)
@@ -475,6 +480,7 @@ class Module:
                 key = winreg.CreateKey(hive, path)
             winreg.SetValueEx(key, param_name, 0, winreg.REG_SZ, value)
             winreg.CloseKey(key)
+            logger.log_reg(MOD, "set", path, param_name, value)
             return True
         except (PermissionError, OSError):
             return False
@@ -483,11 +489,6 @@ class Module:
 
     def _set_icon(self, reg_path, icon_value, param_name="",
                   use_classes_root=False, is_reset=False):
-        """Установка иконки.
-
-        Для use_classes_root=True перебираем HKLM\\SOFTWARE\\Classes →
-        HKCU\\Software\\Classes → HKCR. HKCR — виртуальный hive.
-        """
         value = icon_value if is_reset else f"{self.dll_path},{icon_value}"
 
         if use_classes_root:
@@ -525,7 +526,6 @@ class Module:
         return count
 
     def _reset_libraries_icon(self):
-        """Сброс иконки библиотек. HKCR виртуальный — пишем явно в HKLM → HKCU → HKCR."""
         for hive, path in (
             (winreg.HKEY_LOCAL_MACHINE,
              "SOFTWARE\\Classes\\CLSID\\" + LIBRARIES_CLSID + "\\DefaultIcon"),
@@ -539,7 +539,7 @@ class Module:
         return False
 
     def apply_icon_set(self):
-        if self._is_destroyed or not self.dll_path:
+        if self._is_destroyed or (not self.dll_path and not logger.is_debug()):
             return
         selected = self.icon_set_var.get()
         icon_set = self.ICON_SETS.get(selected)
@@ -547,6 +547,7 @@ class Module:
             messagebox.showerror("Ошибка", "Неверный набор иконок")
             return
         try:
+            logger.log(f"apply icon set '{selected}'", module=MOD)
             for key, value in icon_set.items():
                 if key == "libraries" and value is None:
                     self._reset_libraries_icon()
@@ -581,15 +582,17 @@ class Module:
 
             self.show_message(text, "success", "presets")
         except Exception as e:
+            logger.log(f"ERROR apply_icon_set: {e}", module=MOD)
             messagebox.showerror("Ошибка",
                                  f"Произошла ошибка при применении иконок:\n\n{e}")
 
     def apply_custom_icons(self):
-        if not self.dll_path:
+        if not self.dll_path and not logger.is_debug():
             messagebox.showwarning("Внимание", "Файл imaster.dll не найден!")
             return
         try:
             count = 0
+            logger.log("apply custom icons", module=MOD)
             for key, var in self.custom_icon_vars.items():
                 value = self._get_icon_value(key, var.get())
                 if value is None:
@@ -615,6 +618,7 @@ class Module:
                 self.show_message("Не выбрано ни одной иконки для применения",
                                   "warning", "custom")
         except Exception as e:
+            logger.log(f"ERROR apply_custom_icons: {e}", module=MOD)
             messagebox.showerror("Ошибка",
                                  f"Произошла ошибка при применении иконок:\n\n{e}")
 
@@ -629,6 +633,7 @@ class Module:
             return
         target = "presets" if self.notebook.index(self.notebook.select()) == 0 else "custom"
         try:
+            logger.log("reset icons", module=MOD)
             for key, value in DEFAULT_ICONS.items():
                 try:
                     if key == "recycle_bin_empty":
@@ -654,6 +659,7 @@ class Module:
             self.show_message("Иконки рабочего стола успешно сброшены на стандартные значения",
                               "success", target)
         except Exception as e:
+            logger.log(f"ERROR reset_icons: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Произошла ошибка при сбросе иконок:\n\n{e}")
 
     def show(self):

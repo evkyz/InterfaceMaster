@@ -10,8 +10,9 @@ from tkinter import ttk, messagebox
 
 from PIL import Image, ImageTk
 
+import logger
+
 VALID_HASHES = [
-    'F62A4326A8300D9B828744E24314B98433510195',
     'A522AC997631927EA8CA441F1916E9375AD19805',
 ]
 REG_ROOT = r"Software\InterfaceMaster"
@@ -40,7 +41,7 @@ def check_windows_version():
         minor = int(parts[1])
         build = int(parts[2]) if len(parts) > 2 else 0
         if major == 10 and minor == 0 and build >= 22000:
-            return False, f"Windows 11 (сборка {build})"
+            return True, f"Windows 11 (сборка {build})"
         if major == 10 and minor == 0:
             return True, "Windows 10"
         return False, f"Windows {major}.{minor} (сборка {build})"
@@ -93,6 +94,7 @@ class DLLChecker:
             if os.path.exists(target):
                 DLLChecker.save_dll_path_to_registry(target)
                 DLLChecker.initialize()
+                logger.log(f"DLL copied to {target}", module="main")
                 return True, "Файл успешно скопирован в System32"
             return False, "Не удалось скопировать файл"
         except PermissionError:
@@ -139,6 +141,11 @@ class DLLChecker:
         status = DLLChecker.get_dll_status()
         if not status['should_offer_copy'] or DLLChecker.copy_offered:
             return status['recommended_path']
+        if logger.is_debug():
+            DLLChecker.copy_offered = True
+            logger.log(f"DEBUG: copy-offer skipped, using {status['recommended_path']}",
+                       module="main")
+            return status['recommended_path']
         DLLChecker.copy_offered = True
 
         msg = ("Файл imaster.dll в System32 повреждён!\n\n"
@@ -166,6 +173,10 @@ class DLLChecker:
     @staticmethod
     def get_dll_path_for_module(parent, module_name):
         status = DLLChecker.get_dll_status()
+        if logger.is_debug():
+            path = status.get('recommended_path') or status.get('dll_path')
+            logger.log(f"DEBUG: DLL path for {module_name} = {path}", module="main")
+            return path
         show_warn = parent and module_name in ("desktop", "disk")
         if not status['dll_found']:
             if show_warn:
@@ -182,6 +193,8 @@ class DLLChecker:
     @staticmethod
     def get_dll_path_without_prompt():
         status = DLLChecker.get_dll_status()
+        if logger.is_debug():
+            return status.get('recommended_path') or status.get('dll_path')
         if not status['dll_found'] or not status['hash_match']:
             return None
         return status['recommended_path']
@@ -242,7 +255,7 @@ class DLLCheckerInternal:
 class InterfaceMaster:
     def __init__(self, root):
         self.root = root
-        self.root.title("Interface Master v2.2")
+        self.root.title("Interface Master v2.9 (Dev)")
         self.root.geometry("520x710")
         self.root.resizable(False, False)
 
@@ -262,7 +275,7 @@ class InterfaceMaster:
 
         DLLChecker.initialize()
 
-        self.version = "2.2.3.215"
+        self.version = "2.9.1.218"
         self.logo_photo = None
         self.modules_loaded = self._load_modules()
         self.current_module_instance = None
@@ -273,12 +286,14 @@ class InterfaceMaster:
         self._create_interface()
 
     def _windows_version_check(self):
-        is_w10, _ = check_windows_version()
-        if not is_w10:
+        is_ok, msg = check_windows_version()
+        if not is_ok:
             self.root.after(100, lambda: messagebox.showwarning(
                 "Проверка системы",
                 "Внимание! Корректная работа программы\n"
                 "на данной системе не гарантируется!"))
+        else:
+            logger.log(f"OS check: {msg}", module="app")
 
     def _load_modules(self):
         modules = {}
@@ -295,7 +310,8 @@ class InterfaceMaster:
                         modules[name] = mod
                 else:
                     modules[name] = __import__(name)
-            except Exception:
+            except Exception as e:
+                logger.log(f"LOAD MODULE FAIL {name}: {e}", module="app")
                 continue
         return modules
 
@@ -389,6 +405,7 @@ class InterfaceMaster:
         if module_name not in self.modules_loaded:
             messagebox.showerror("Ошибка", f"Модуль {module_name} не загружен")
             return
+        logger.log_module_open(module_name)
         self.menu_frame.pack_forget()
         self.module_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         self.back_btn.grid()
@@ -414,7 +431,8 @@ class InterfaceMaster:
                         parent=self.module_frame, module_name=module_name)
                 else:
                     self.current_module_instance = cls(parent=self.module_frame)
-        except Exception:
+        except Exception as e:
+            logger.log(f"MODULE FAIL {module_name}: {e}", module="app")
             ttk.Label(self.module_frame,
                       text=f"Ошибка загрузки модуля {module_name}",
                       foreground="red").pack(expand=True)
@@ -437,6 +455,7 @@ class InterfaceMaster:
 
 
 def main():
+    logger.init_from_argv(sys.argv)
     root = tk.Tk()
     InterfaceMaster(root)
     root.mainloop()
@@ -444,3 +463,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    logger.init_from_argv(sys.argv)

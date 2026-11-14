@@ -5,6 +5,11 @@ import tkinter as tk
 import tkinter.filedialog as filedialog
 from tkinter import ttk, messagebox
 
+import logger
+from core.ui_utils import add_tooltip
+
+MOD = "mod"
+
 EXPECTED_HASHES = {
     "imageres.dll": "DDD5D7462A26F7837CD02A7667615354F9377A0A727BF880D825676D6DDC4CB7",
     "imagesp1.dll": "466E64D491C7B3D7051FBDC0907CD813D7A6435D18BF4B00CE0C3191B80E0541",
@@ -45,23 +50,7 @@ class Module:
         self._update_buttons_state()
         self.show()
 
-    def _create_tooltip(self, widget, text):
-        def enter(event):
-            tip = tk.Toplevel()
-            tip.wm_overrideredirect(True)
-            tip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-            tk.Label(tip, text=text, background="lightyellow",
-                     relief="solid", borderwidth=1, font=("Arial", 8)).pack()
-            widget.tooltip = tip
-
-        def leave(event):
-            if getattr(widget, 'tooltip', None):
-                widget.tooltip.destroy()
-                widget.tooltip = None
-
-        widget.bind("<Enter>", enter)
-        widget.bind("<Leave>", leave)
-
+    # ---- UI ----
     def _create_widgets(self):
         ttk.Label(self.frame, text="Модификация системных DLL-файлов",
                   font=('Arial', 16, 'bold'), foreground='#2c3e50').pack(pady=10)
@@ -78,8 +67,8 @@ class Module:
                                 text="Выбрать папку с модифицированными файлами",
                                 command=self._select_folder, width=40)
         select_btn.pack(pady=8, fill=tk.X)
-        self._create_tooltip(select_btn,
-                             "Выберите папку, содержащую модифицированные DLL-файлы")
+        add_tooltip(select_btn,
+                    "Выберите папку, содержащую модифицированные DLL-файлы")
 
         self.result_label = ttk.Label(settings, text="", foreground="red")
         self.result_label.pack(pady=5)
@@ -96,7 +85,7 @@ class Module:
                                  variable=self.file_vars[filename],
                                  command=self._update_buttons_state)
             cb.pack(side=tk.LEFT, anchor=tk.W)
-            self._create_tooltip(cb, f"Включить/выключить модификацию файла {filename}")
+            add_tooltip(cb, f"Включить/выключить модификацию файла {filename}")
             status = ttk.Label(row, text="", font=('Arial', 8))
             status.pack(side=tk.RIGHT, padx=5)
             self.status_labels[filename] = status
@@ -105,21 +94,23 @@ class Module:
         actions.pack(pady=15, fill=tk.X)
 
         self.start_button = ttk.Button(actions, text="Начать",
-                                       command=self._start_modification, state="disabled")
+                                       command=self._start_modification,
+                                       state="disabled")
         self.start_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self._create_tooltip(self.start_button,
-                             "Начать процесс модификации выбранных файлов")
+        add_tooltip(self.start_button,
+                    "Начать процесс модификации выбранных файлов")
 
         self.restore_button = ttk.Button(actions, text="Восстановить",
                                          command=self._restore_originals,
                                          state="disabled")
         self.restore_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self._create_tooltip(self.restore_button,
-                             "Восстановить оригинальные версии файлов")
+        add_tooltip(self.restore_button,
+                    "Восстановить оригинальные версии файлов")
 
-        hash_btn = ttk.Button(actions, text="Посмотреть хеш", command=self._view_hashes)
+        hash_btn = ttk.Button(actions, text="Посмотреть хеш",
+                              command=self._view_hashes)
         hash_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self._create_tooltip(hash_btn, "Показать хеш-суммы файлов в системе")
+        add_tooltip(hash_btn, "Показать хеш-суммы файлов в системе")
 
         ttk.Label(settings,
                   text="⚠️ Внимание: Модификация системных файлов\n"
@@ -128,6 +119,7 @@ class Module:
                   font=('Arial', 8), foreground='#e67e22',
                   justify=tk.CENTER).pack(pady=10)
 
+    # ---- system state ----
     def _check_system_files_status(self):
         self.system_file_status = {}
         for filename, expected in EXPECTED_HASHES.items():
@@ -157,6 +149,12 @@ class Module:
             self.restore_button.config(state="disabled")
             return
 
+        if logger.is_debug():
+            self.start_button.config(
+                state="normal" if (self.selected_folder and selected) else "disabled")
+            self.restore_button.config(state="normal")
+            return
+
         any_mismatch = any_match = False
         all_exist = True
         for f in selected:
@@ -174,6 +172,7 @@ class Module:
         self.restore_button.config(
             state="normal" if (any_match and all_exist) else "disabled")
 
+    # ---- actions ----
     def _select_folder(self):
         path = filedialog.askdirectory()
         if not path:
@@ -182,7 +181,7 @@ class Module:
             messagebox.showerror("Ошибка", "Выбор папки System32 запрещен!")
             return
         self.selected_folder = path
-        self._log(f"Выбрана папка: {path}")
+        logger.log(f"selected folder: {path}", module=MOD)
         self._check_files_and_show_result()
         self._update_buttons_state()
 
@@ -211,34 +210,31 @@ class Module:
                 text="✗ Некоторые файлы отсутствуют или не соответствуют",
                 foreground="red")
 
-    def _log(self, message):
-        try:
-            log_path = os.path.join(os.path.expanduser("~"), "Desktop", "mod.log")
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(message + "\n")
-        except Exception:
-            pass
-
     def _restore_originals(self):
         files = [f for f, v in self.file_vars.items() if v.get()]
         if not files:
-            messagebox.showwarning("Предупреждение", "Не выбраны файлы для восстановления")
+            messagebox.showwarning("Предупреждение",
+                                   "Не выбраны файлы для восстановления")
             return
 
-        to_restore = [f for f in files
-                      if self.system_file_status.get(f, {}).get('exists')
-                      and self.system_file_status[f].get('matches_expected')]
+        if logger.is_debug():
+            to_restore = [f for f in files
+                          if self.system_file_status.get(f, {}).get('exists')]
+        else:
+            to_restore = [f for f in files
+                          if self.system_file_status.get(f, {}).get('exists')
+                          and self.system_file_status[f].get('matches_expected')]
         if not to_restore:
             messagebox.showinfo("Информация",
                                 "Выбранные файлы уже являются оригинальными "
                                 "и не требуют восстановления")
             return
 
+        logger.log(f"restore files: {to_restore}", module=MOD)
         try:
             subprocess.run("taskkill /f /im explorer.exe", shell=True, check=True)
         except Exception as e:
-            self._log(f"Ошибка при завершении explorer.exe: {e}")
+            logger.log(f"ERROR taskkill explorer: {e}", module=MOD)
 
         restored = 0
         for filename in to_restore:
@@ -249,17 +245,18 @@ class Module:
                 except Exception:
                     try:
                         os.rename(target, f"{target}_mod")
-                        subprocess.run(f'del "{target}_mod" >nul 2>&1', shell=True,
-                                       check=True)
+                        subprocess.run(f'del "{target}_mod" >nul 2>&1',
+                                       shell=True, check=True)
                     except Exception as e:
-                        self._log(f"Ошибка при переименовании {filename}: {e}")
+                        logger.log(f"ERROR rename {filename}: {e}", module=MOD)
             orig = f"{target}_orig"
             if os.path.exists(orig):
                 try:
                     os.rename(orig, target)
                     restored += 1
+                    logger.log(f"restored {filename}", module=MOD)
                 except Exception as e:
-                    self._log(f"Ошибка при восстановлении {filename}: {e}")
+                    logger.log(f"ERROR restore {filename}: {e}", module=MOD)
             acl = f"{target}.acl"
             if os.path.exists(acl):
                 try:
@@ -277,16 +274,21 @@ class Module:
 
     def _start_modification(self):
         if not self.selected_folder:
-            messagebox.showerror("Ошибка", "Выберите папку с модифицированными файлами")
+            messagebox.showerror("Ошибка",
+                                 "Выберите папку с модифицированными файлами")
             return
         files = [f for f, v in self.file_vars.items() if v.get()]
         if not files:
-            messagebox.showwarning("Предупреждение", "Не выбраны файлы для модификации")
+            messagebox.showwarning("Предупреждение",
+                                   "Не выбраны файлы для модификации")
             return
 
-        to_modify = [f for f in files
-                     if self.system_file_status.get(f, {}).get('exists')
-                     and not self.system_file_status[f].get('matches_expected')]
+        if logger.is_debug():
+            to_modify = list(files)
+        else:
+            to_modify = [f for f in files
+                         if self.system_file_status.get(f, {}).get('exists')
+                         and not self.system_file_status[f].get('matches_expected')]
         if not to_modify:
             messagebox.showinfo("Информация",
                                 "Выбранные файлы уже соответствуют эталонным хешам "
@@ -301,10 +303,11 @@ class Module:
                                  f"{', '.join(missing)}!")
             return
 
+        logger.log(f"modify files: {to_modify}", module=MOD)
         try:
             subprocess.run("taskkill /f /im explorer.exe", shell=True, check=True)
         except Exception as e:
-            self._log(f"Ошибка при завершении explorer.exe: {e}")
+            logger.log(f"ERROR taskkill explorer: {e}", module=MOD)
 
         modified = 0
         for filename in to_modify:
@@ -323,8 +326,10 @@ class Module:
                 if os.path.exists(target):
                     os.rename(target, backup)
 
-                subprocess.run(f'copy "{src}" "{target}" >nul 2>&1', shell=True, check=True)
+                subprocess.run(f'copy "{src}" "{target}" >nul 2>&1',
+                               shell=True, check=True)
                 modified += 1
+                logger.log(f"modified {filename}", module=MOD)
 
                 subprocess.run(f'icacls "{target}" /setowner '
                                f'"NT SERVICE\\TrustedInstaller" >nul 2>&1',
@@ -332,7 +337,7 @@ class Module:
                 subprocess.run(f'icacls "{target}" /restore "{acl}" >nul 2>&1',
                                shell=True, check=True)
             except Exception as e:
-                self._log(f"Ошибка при обработке файла {filename}: {e}")
+                logger.log(f"ERROR modify {filename}: {e}", module=MOD)
 
         subprocess.Popen("explorer.exe", shell=True)
         self._check_system_files_status()
@@ -362,10 +367,10 @@ class Module:
         content.pack(fill=tk.BOTH, expand=True)
         header = ttk.Frame(content)
         header.pack(fill=tk.X, pady=(0, 5))
-        ttk.Label(header, text="Файл", font=("Arial", 10, "bold"), width=25).pack(
-            side=tk.LEFT, padx=(0, 10))
-        ttk.Label(header, text="Статус", font=("Arial", 10, "bold"), width=20).pack(
-            side=tk.LEFT, padx=(0, 10))
+        ttk.Label(header, text="Файл", font=("Arial", 10, "bold"),
+                  width=25).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Label(header, text="Статус", font=("Arial", 10, "bold"),
+                  width=20).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Label(header, text="SHA-256 Хеш",
                   font=("Arial", 10, "bold")).pack(side=tk.LEFT)
 
@@ -382,21 +387,21 @@ class Module:
                     ttk.Label(row,
                               text="✓ Модифицирован" if match else "✗ Оригинал",
                               foreground="green" if match else "red",
-                              font=("Arial", 9), width=20, anchor="w").pack(
-                        side=tk.LEFT, padx=(0, 10))
+                              font=("Arial", 9), width=20,
+                              anchor="w").pack(side=tk.LEFT, padx=(0, 10))
                     ttk.Label(row, text=h, font=("Courier New", 9),
                               anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
                 else:
                     ttk.Label(row, text="✗ Не найден", foreground="red",
-                              font=("Arial", 9), width=20, anchor="w").pack(
-                        side=tk.LEFT, padx=(0, 10))
+                              font=("Arial", 9), width=20,
+                              anchor="w").pack(side=tk.LEFT, padx=(0, 10))
                     ttk.Label(row, text="Файл не существует",
                               font=("Courier New", 9), foreground="red",
                               anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
             except Exception as e:
                 ttk.Label(row, text="✗ Ошибка", foreground="red",
-                          font=("Arial", 9), width=20, anchor="w").pack(
-                    side=tk.LEFT, padx=(0, 10))
+                          font=("Arial", 9), width=20,
+                          anchor="w").pack(side=tk.LEFT, padx=(0, 10))
                 ttk.Label(row, text=f"Ошибка чтения: {e}",
                           font=("Courier New", 9), foreground="red",
                           anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)

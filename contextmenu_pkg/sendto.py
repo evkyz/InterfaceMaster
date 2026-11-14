@@ -3,6 +3,10 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+import logger
+from core.ui_utils import add_tooltip
+
+MOD = "sendto"
 SENDTO_PATH = os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'SendTo')
 
 
@@ -19,7 +23,10 @@ def set_hidden(path, hidden=True):
     if attrs == -1:
         return False
     attrs = (attrs | 0x2) if hidden else (attrs & ~0x2)
-    return _set_attrs(path, attrs)
+    ok = _set_attrs(path, attrs)
+    if ok:
+        logger.log_file_attr(MOD, path, "hide" if hidden else "unhide")
+    return ok
 
 
 def is_hidden(path):
@@ -73,10 +80,12 @@ class SendToModule:
             if not items:
                 return
             all_hidden = all(is_hidden(p) for _, p in items)
+            logger.log(f"toggle all sendto (hide={not all_hidden})", module=MOD)
             for _, path in items:
                 set_hidden(path, not all_hidden)
             self.refresh()
         except Exception as e:
+            logger.log(f"ERROR toggle_all: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {e}")
 
     def _on_selection(self, event):
@@ -105,6 +114,7 @@ class SendToModule:
                 return
             self.refresh()
         except Exception as e:
+            logger.log(f"ERROR toggle_selected: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Ошибка при переключении: {e}")
 
     def refresh(self):

@@ -2,15 +2,14 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+import logger
+from core import reg_utils, win_utils
+
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+MOD = "str"
 
 SHELL_ICONS = r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Icons'
 NAMING_TEMPLATES = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\NamingTemplates'
-
-
-def _reg(*args):
-    return subprocess.run(['reg', *args], capture_output=True, text=True,
-                          encoding='cp866', creationflags=CREATE_NO_WINDOW)
 
 
 class Module:
@@ -67,12 +66,10 @@ class Module:
         self.status_label.pack(pady=5)
 
     def _load_current_state(self):
-        """Выставляет radiobutton в соответствии с текущими настройками реестра."""
-        # Стрелки ярлыков
         arrow_choice = 1
         try:
-            r = _reg('query', SHELL_ICONS, '/v', '29')
-            if r.returncode == 0 and 'REG_SZ' in r.stdout:
+            r = reg_utils.reg('query', SHELL_ICONS, '/v', '29', log=False)
+            if r.returncode == 0 and 'REG_SZ' in (r.stdout or ''):
                 parts = r.stdout.split('REG_SZ', 1)
                 value = parts[1].strip() if len(parts) > 1 else ''
                 if value == '':
@@ -85,11 +82,11 @@ class Module:
             arrow_choice = 1
         self.arrow_choice.set(arrow_choice)
 
-        # Текст ярлыков
         text_choice = 1
         try:
-            r = _reg('query', NAMING_TEMPLATES, '/v', 'ShortcutNameTemplate')
-            if r.returncode == 0 and 'REG_SZ' in r.stdout:
+            r = reg_utils.reg('query', NAMING_TEMPLATES,
+                              '/v', 'ShortcutNameTemplate', log=False)
+            if r.returncode == 0 and 'REG_SZ' in (r.stdout or ''):
                 parts = r.stdout.split('REG_SZ', 1)
                 value = parts[1].strip() if len(parts) > 1 else ''
                 if '%s.lnk' in value and '— ярлык' not in value:
@@ -100,70 +97,56 @@ class Module:
             text_choice = 1
         self.shortcut_text_choice.set(text_choice)
 
-    @staticmethod
-    def _delete_value_if_exists(key_path, value_name):
-        r = _reg('query', key_path, '/v', value_name)
-        if r.returncode == 0:
-            _reg('delete', key_path, '/v', value_name, '/f')
-
-    @staticmethod
-    def _set_value(key_path, value_name, value_data, value_type='REG_SZ'):
-        if value_data == "" and value_type == 'REG_SZ':
-            _reg('add', key_path, '/v', value_name, '/t', value_type, '/f')
-        else:
-            _reg('add', key_path, '/v', value_name, '/d', value_data,
-                 '/t', value_type, '/f')
-
-    @staticmethod
-    def _clear_icon_cache():
-        try:
-            subprocess.run(['ie4uinit.exe', '-show'], capture_output=True,
-                           creationflags=CREATE_NO_WINDOW)
-        except Exception:
-            pass
-
     def apply_changes(self):
         try:
             arrow = self.arrow_choice.get()
             text = self.shortcut_text_choice.get()
 
             if arrow == 1:
-                self._delete_value_if_exists(SHELL_ICONS, '29')
+                reg_utils.reg_delete(SHELL_ICONS, '29', module=MOD)
                 self._show_status("✓ Установлены стандартные большие стрелки", False)
             elif arrow == 2:
-                self._set_value(SHELL_ICONS, '29',
-                                'C:\\Windows\\System32\\shell32.dll,-30')
+                reg_utils.reg_add(SHELL_ICONS, '29',
+                                  'C:\\Windows\\System32\\shell32.dll,-30',
+                                  'REG_SZ', module=MOD)
                 self._show_status("✓ Установлены маленькие стрелки", False)
             elif arrow == 3:
-                self._set_value(SHELL_ICONS, '29', '')
+                reg_utils.reg_add(SHELL_ICONS, '29', '', 'REG_SZ', module=MOD)
                 self._show_status("✓ Стрелки ярлыков удалены", False)
 
             if text == 1:
-                self._set_value(NAMING_TEMPLATES, 'ShortcutNameTemplate',
-                                '\\"%s — ярлык.lnk\\"')
+                reg_utils.reg_add(NAMING_TEMPLATES, 'ShortcutNameTemplate',
+                                  '\\"%s — ярлык.lnk\\"', 'REG_SZ', module=MOD)
                 self._show_status("✓ Текст ' — ярлык' восстановлен", False)
             elif text == 2:
-                self._set_value(NAMING_TEMPLATES, 'ShortcutNameTemplate',
-                                '\\"%s.lnk\\"')
+                reg_utils.reg_add(NAMING_TEMPLATES, 'ShortcutNameTemplate',
+                                  '\\"%s.lnk\\"', 'REG_SZ', module=MOD)
                 self._show_status("✓ Текст ' — ярлык' удален", False)
 
             self._clear_icon_cache()
             if arrow > 0 or text > 0:
                 self._show_status("✓ Настройки успешно применены")
         except subprocess.CalledProcessError:
+            logger.log("ERROR apply_changes: reg failed", module=MOD)
             messagebox.showerror("Ошибка", "Не удалось изменить настройки реестра")
         except Exception as e:
+            logger.log(f"ERROR apply_changes: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Произошла непредвиденная ошибка: {e}")
 
     def _restart_explorer(self):
-        try:
-            subprocess.run(['taskkill', '/f', '/im', 'explorer.exe'],
-                           capture_output=True, creationflags=CREATE_NO_WINDOW)
-            subprocess.Popen('explorer.exe', shell=True,
-                             creationflags=CREATE_NO_WINDOW)
+        if win_utils.restart_explorer(MOD):
             self._show_status("✓ Проводник успешно перезапущен")
-        except Exception:
+        else:
             messagebox.showerror("Ошибка", "Не удалось перезапустить Проводник")
+
+    @staticmethod
+    def _clear_icon_cache():
+        try:
+            subprocess.run(['ie4uinit.exe', '-show'], capture_output=True,
+                           creationflags=CREATE_NO_WINDOW)
+            logger.log("ie4uinit -show", module=MOD)
+        except Exception:
+            pass
 
     def _show_status(self, message, clear_previous=True):
         if self._status_timer:

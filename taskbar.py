@@ -1,248 +1,142 @@
-import re
 import subprocess
-import sys
-import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-_WIN_VERSION_CACHE = None
-_WIN_EDITION_CACHE = None
+import logger
+from core import win_utils, reg_utils
+from core.ui_utils import add_tooltip
 
-def _run(args, **kwargs):
-    kwargs.setdefault("creationflags", CREATE_NO_WINDOW)
-    return subprocess.run(args, **kwargs)
-
-
-# ---------- Модульные проверки версии/редакции (без UI) ----------
-
-def get_windows_version():
-    """Возвращает полную версию Windows в формате major.minor.build.revision."""
-    global _WIN_VERSION_CACHE
-    if _WIN_VERSION_CACHE is not None:
-        return _WIN_VERSION_CACHE
-    try:
-        r = _run(['wmic', 'os', 'get', 'Version', '/value'],
-                 capture_output=True, text=True, encoding='cp866')
-        m = re.search(r'Version=(\d+\.\d+\.\d+\.\d+)', r.stdout)
-        if m:
-            _WIN_VERSION_CACHE = m.group(1)
-            return _WIN_VERSION_CACHE
-    except Exception:
-        pass
-    try:
-        r = _run(['reg', 'query',
-                  'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                  '/v', 'CurrentBuildNumber'],
-                 capture_output=True, text=True, encoding='cp866')
-        m = re.search(r'CurrentBuildNumber\s+REG_SZ\s+(\d+)', r.stdout)
-        if m:
-            build = m.group(1)
-            rev = 0
-            try:
-                r2 = _run(['reg', 'query',
-                           'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                           '/v', 'UBR'],
-                          capture_output=True, text=True, encoding='cp866')
-                ubr = re.search(r'UBR\s+REG_DWORD\s+0x([0-9a-fA-F]+)', r2.stdout)
-                if ubr:
-                    rev = int(ubr.group(1), 16)
-            except Exception:
-                pass
-            _WIN_VERSION_CACHE = f"10.0.{build}.{rev}"
-            return _WIN_VERSION_CACHE
-    except Exception:
-        pass
-    _WIN_VERSION_CACHE = "10.0.0.0"
-    return _WIN_VERSION_CACHE
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+MOD = "taskbar"
 
 
-def get_build_number(version=None):
-    if version is None:
-        version = get_windows_version()
-    try:
-        return int(version.split('.')[2])
-    except Exception:
-        return 0
-
-
-def get_revision_number(version=None):
-    if version is None:
-        version = get_windows_version()
-    try:
-        parts = version.split('.')
-        return int(parts[3]) if len(parts) > 3 else 0
-    except Exception:
-        return 0
-
-
-def get_edition_id():
-    """Возвращает EditionID из реестра (Enterprise, EnterpriseS, Professional и т.д.)."""
-    global _WIN_EDITION_CACHE
-    if _WIN_EDITION_CACHE is not None:
-        return _WIN_EDITION_CACHE
-    try:
-        r = _run(['reg', 'query',
-                  'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
-                  '/v', 'EditionID'],
-                 capture_output=True, text=True, encoding='cp866')
-        m = re.search(r'EditionID\s+REG_SZ\s+(\S+)', r.stdout)
-        _WIN_EDITION_CACHE = m.group(1) if m else ''
-        return _WIN_EDITION_CACHE
-    except Exception:
-        _WIN_EDITION_CACHE = ''
-        return _WIN_EDITION_CACHE
-
-
-def is_enterprise():
-    """Корпоративные редакции: Enterprise или EnterpriseS (LTSC)."""
-    return get_edition_id() in ('Enterprise', 'EnterpriseS')
-
-
-def is_corporate_edition():
-    """Для тултипов: Enterprise или EnterpriseS."""
-    return is_enterprise()
-
+# ---------- Тонкие обёртки для обратной совместимости ----------
+# Внешний код (about.py) вызывает taskbar.is_people_bar_supported() и
+# taskbar.is_windows_version_supported() — оставляем как прокси в core.win_utils.
 
 def is_windows_version_supported():
-    """Meet Now: 2004 (>=19041.610), 20H2 (>=19042.610), 21H2+ (>=19044).
-
-    Не поддерживается в корпоративных редакциях (Enterprise, EnterpriseS).
-    """
-    if is_corporate_edition():
-        return False
-    build = get_build_number()
-    rev = get_revision_number()
-    if build == 19041:
-        return rev >= 610
-    if build == 19042:
-        return rev >= 610
-    return build >= 19044
+    return win_utils.is_meet_now_supported()
 
 
 def is_people_bar_supported():
-    """Кнопка 'Люди' доступна в Windows 10 1709, 1803, 1809, 1903.
+    return win_utils.is_people_bar_supported()
 
-    Сквозная проверка по диапазону build:
-    16299 (1709) <= build < 18363 (1909).
-    Покрывает все накопительные обновления внутри каждой версии.
-    В корпоративных редакциях (Enterprise, EnterpriseS) кнопка недоступна.
-    """
-    if is_corporate_edition():
-        return False
-    build = get_build_number()
-    return 16299 <= build < 18363
+
+def is_enterprise():
+    return win_utils.is_corporate_edition()
+
+
+def is_corporate_edition():
+    return win_utils.is_corporate_edition()
+
+
+def get_windows_version():
+    return win_utils.get_windows_version()
+
+
+def get_build_number(version=None):
+    return win_utils.get_build_number()
+
+
+def get_revision_number(version=None):
+    return win_utils.get_revision_number()
+
+
+def get_edition_id():
+    return win_utils.get_edition_id()
 
 
 class Module:
     def __init__(self, parent):
         self.parent = parent
         self.frame = ttk.Frame(parent)
-        self.windows_version = get_windows_version()
+        self.windows_version = win_utils.get_windows_version()
         self._create_widgets()
         self.show()
 
     # ---- тонкие обёртки для обратной совместимости ----
     def _get_build_number(self):
-        return get_build_number(self.windows_version)
+        return win_utils.get_build_number()
 
     def _get_revision_number(self):
-        return get_revision_number(self.windows_version)
+        return win_utils.get_revision_number()
 
     def _get_edition_id(self):
-        return get_edition_id()
+        return win_utils.get_edition_id()
 
     def is_enterprise(self):
-        return is_enterprise()
+        return win_utils.is_corporate_edition()
 
     def is_corporate_edition(self):
-        return is_corporate_edition()
+        return win_utils.is_corporate_edition()
 
     def is_windows_version_supported(self):
-        return is_windows_version_supported()
+        return win_utils.is_meet_now_supported()
 
     def is_people_bar_supported(self):
-        return is_people_bar_supported()
-
-    def _tooltip(self, widget, text):
-        def enter(event):
-            tip = tk.Toplevel()
-            tip.wm_overrideredirect(True)
-            tip.wm_geometry(f"+{event.x_root + 10}+{event.y_root + 10}")
-            tk.Label(tip, text=text, background="lightyellow", relief="solid",
-                     borderwidth=1, font=("Arial", 8)).pack()
-            widget.tooltip = tip
-
-        def leave(event):
-            if getattr(widget, 'tooltip', None):
-                widget.tooltip.destroy()
-                widget.tooltip = None
-
-        widget.bind("<Enter>", enter)
-        widget.bind("<Leave>", leave)
+        return win_utils.is_people_bar_supported()
 
     # ---- state checks ----
     def check_weekday_state(self):
-        r = _run(['reg', 'query', 'HKCU\\Control Panel\\International',
-                  '/v', 'sShortDate'], capture_output=True, text=True, encoding='cp866')
-        return "ddd" in r.stdout
+        r = reg_utils.reg('query', 'HKCU\\Control Panel\\International',
+                          '/v', 'sShortDate', log=False)
+        return "ddd" in (r.stdout or '')
 
     def check_notification_center_state(self):
-        r = _run(['reg', 'query',
-                  'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
-                  '/v', 'DisableNotificationCenter'],
-                 capture_output=True, text=True, encoding='cp866')
-        return "0x1" in r.stdout
+        r = reg_utils.reg('query',
+                          'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
+                          '/v', 'DisableNotificationCenter', log=False)
+        return "0x1" in (r.stdout or '')
 
     def check_taskbar_size_state(self):
-        r = _run(['reg', 'query',
-                  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-                  '/v', 'TaskbarSmallIcons'],
-                 capture_output=True, text=True, encoding='cp866')
-        return "0x1" in r.stdout
+        r = reg_utils.reg(
+            'query',
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            '/v', 'TaskbarSmallIcons', log=False)
+        return "0x1" in (r.stdout or '')
 
     def check_search_state(self):
-        r = _run(['reg', 'query',
-                  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search',
-                  '/v', 'SearchboxTaskbarMode'],
-                 capture_output=True, text=True, encoding='cp866')
-        if "0x0" in r.stdout:
+        r = reg_utils.reg('query',
+                          'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search',
+                          '/v', 'SearchboxTaskbarMode', log=False)
+        out = r.stdout or ''
+        if "0x0" in out:
             return 0
-        if "0x1" in r.stdout:
+        if "0x1" in out:
             return 1
         return 2
 
     def check_people_state(self):
-        r = _run(['reg', 'query',
-                  'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
-                  '/v', 'HidePeopleBar'],
-                 capture_output=True, text=True, encoding='cp866')
-        return "0x1" in r.stdout
+        r = reg_utils.reg('query',
+                          'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
+                          '/v', 'HidePeopleBar', log=False)
+        return "0x1" in (r.stdout or '')
 
     def check_task_view_state(self):
-        r = _run(['reg', 'query',
-                  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-                  '/v', 'ShowTaskViewButton'],
-                 capture_output=True, text=True, encoding='cp866')
-        return "0x0" in r.stdout
+        r = reg_utils.reg(
+            'query',
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            '/v', 'ShowTaskViewButton', log=False)
+        return "0x0" in (r.stdout or '')
 
     def check_meet_now_state(self):
-        r = _run(['reg', 'query',
-                  'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
-                  '/v', 'HideSCAMeetNow'],
-                 capture_output=True, text=True, encoding='cp866')
-        return "0x1" in r.stdout
+        r = reg_utils.reg(
+            'query',
+            'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
+            '/v', 'HideSCAMeetNow', log=False)
+        return "0x1" in (r.stdout or '')
 
     def check_grouping_state(self):
-        r = _run(['reg', 'query',
-                  'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-                  '/v', 'TaskbarGlomLevel'],
-                 capture_output=True, text=True, encoding='cp866')
-        if "0x0" in r.stdout:
+        r = reg_utils.reg(
+            'query',
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            '/v', 'TaskbarGlomLevel', log=False)
+        out = r.stdout or ''
+        if "0x0" in out:
             return 0
-        if "0x1" in r.stdout:
+        if "0x1" in out:
             return 1
-        if "0x2" in r.stdout:
+        if "0x2" in out:
             return 2
         return 0
 
@@ -273,10 +167,11 @@ class Module:
         grouping_state = self.check_grouping_state()
         grouping_texts = {0: " (Всегда)", 1: " (При заполнении)", 2: " (Никогда)"}
         self.toggle_grouping_button = ttk.Button(
-            settings, text="Изменить группировку кнопок" + grouping_texts[grouping_state],
+            settings,
+            text="Изменить группировку кнопок" + grouping_texts[grouping_state],
             command=self._toggle_grouping, width=40)
         self.toggle_grouping_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_grouping_button, "Всегда → При заполнении → Никогда")
+        add_tooltip(self.toggle_grouping_button, "Всегда → При заполнении → Никогда")
 
         size = self.check_taskbar_size_state()
         self.toggle_taskbar_size_button = ttk.Button(
@@ -285,8 +180,8 @@ class Module:
                  + (" (Маленькие)" if size else " (Большие)"),
             command=self._toggle_taskbar_size, width=40)
         self.toggle_taskbar_size_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_taskbar_size_button,
-                      "Переключает между большими и маленькими значками")
+        add_tooltip(self.toggle_taskbar_size_button,
+                    "Переключает между большими и маленькими значками")
 
         search = self.check_search_state()
         search_texts = {0: " (Скрыто)", 1: " (Значок)", 2: " (Поле)"}
@@ -294,7 +189,7 @@ class Module:
             settings, text="Скрыть/Показать Поиск" + search_texts[search],
             command=self._toggle_search, width=40)
         self.toggle_search_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_search_button, "Поле → Значок → Скрыто")
+        add_tooltip(self.toggle_search_button, "Поле → Значок → Скрыто")
 
         tv = self.check_task_view_state()
         self.toggle_task_view_button = ttk.Button(
@@ -303,10 +198,10 @@ class Module:
                  + (" (Показано)" if not tv else " (Скрыто)"),
             command=self._toggle_task_view, width=40)
         self.toggle_task_view_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_task_view_button,
-                      "Скрывает или показывает кнопку 'Просмотр задач'")
+        add_tooltip(self.toggle_task_view_button,
+                    "Скрывает или показывает кнопку 'Просмотр задач'")
 
-        # --- People: Windows 10 1709 / 1803 / 1809 / 1903, не Enterprise/EnterpriseS ---
+        # --- People ---
         people_supported = self.is_people_bar_supported()
         people = self.check_people_state() if people_supported else False
         people_text = (" (Показано)" if not people else " (Скрыто)") if people_supported else ""
@@ -316,15 +211,15 @@ class Module:
             command=self._toggle_people, width=40)
         self.toggle_people_button.pack(pady=5, fill=tk.X)
         if people_supported:
-            self._tooltip(self.toggle_people_button,
-                          "Скрывает или показывает кнопку 'Люди'")
-        else:
+            add_tooltip(self.toggle_people_button,
+                        "Скрывает или показывает кнопку 'Люди'")
+        elif not logger.is_debug():
             self.toggle_people_button.config(state='disabled')
             if self.is_corporate_edition():
                 tip_text = "Недоступно в Корпоративных редакциях"
             else:
                 tip_text = "Доступно только в Windows 10 1709/1803/1809/1903"
-            self._tooltip(self.toggle_people_button, tip_text)
+            add_tooltip(self.toggle_people_button, tip_text)
 
         notif = self.check_notification_center_state()
         self.toggle_notification_center_button = ttk.Button(
@@ -333,10 +228,10 @@ class Module:
                  + (" (Показано)" if not notif else " (Скрыто)"),
             command=self._toggle_notification_center, width=40)
         self.toggle_notification_center_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_notification_center_button,
-                      "Включает или отключает Центр уведомлений")
+        add_tooltip(self.toggle_notification_center_button,
+                    "Включает или отключает Центр уведомлений")
 
-        # --- Meet Now: 2004 (>=19041.610), 20H2 (>=19042.610), 21H2+ (>=19044), не Enterprise/EnterpriseS ---
+        # --- Meet Now ---
         supported = self.is_windows_version_supported()
         meet = self.check_meet_now_state() if supported else False
         meet_text = (" (Показано)" if not meet else " (Скрыто)") if supported else ""
@@ -346,16 +241,16 @@ class Module:
             command=self._toggle_meet_now, width=40)
         self.toggle_meet_now_button.pack(pady=5, fill=tk.X)
         if supported:
-            self._tooltip(self.toggle_meet_now_button,
-                          "Скрывает или показывает кнопку 'Провести собрание'")
-        else:
+            add_tooltip(self.toggle_meet_now_button,
+                        "Скрывает или показывает кнопку 'Провести собрание'")
+        elif not logger.is_debug():
             self.toggle_meet_now_button.config(state='disabled')
             if self.is_corporate_edition():
                 tip_text = "Недоступно в Корпоративных редакциях"
             else:
                 tip_text = ("Доступно только в Windows 10 2004/20H2 "
                             "(с KB4580364) и новее")
-            self._tooltip(self.toggle_meet_now_button, tip_text)
+            add_tooltip(self.toggle_meet_now_button, tip_text)
 
         weekday = self.check_weekday_state()
         self.toggle_weekday_button = ttk.Button(
@@ -364,19 +259,19 @@ class Module:
                  + (" (Показано)" if weekday else " (Скрыто)"),
             command=self._toggle_weekday, width=40)
         self.toggle_weekday_button.pack(pady=5, fill=tk.X)
-        self._tooltip(self.toggle_weekday_button,
-                      "Добавляет или убирает день недели в системной дате")
+        add_tooltip(self.toggle_weekday_button,
+                    "Добавляет или убирает день недели в системной дате")
 
         extra = ttk.Frame(settings)
         extra.pack(fill=tk.X, pady=10)
         restart_btn = ttk.Button(extra, text="Перезапустить Проводник",
                                  command=self._restart_explorer, width=18)
         restart_btn.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        self._tooltip(restart_btn, "Перезапускает Проводник Windows")
+        add_tooltip(restart_btn, "Перезапускает Проводник Windows")
         reset_btn = ttk.Button(extra, text="Сбросить все настройки",
                                command=self._reset_all, width=18)
         reset_btn.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
-        self._tooltip(reset_btn, "Сбрасывает все настройки панели задач")
+        add_tooltip(reset_btn, "Сбрасывает все настройки панели задач")
 
     # ---- toggle wrappers ----
     def _toggle_weekday(self):
@@ -403,7 +298,7 @@ class Module:
                                  self.check_search_state(), is_search=True)
 
     def _toggle_people(self):
-        if not self.is_people_bar_supported():
+        if not self.is_people_bar_supported() and not logger.is_debug():
             return
         self._do_toggle_people()
         self._update_button_text(self.toggle_people_button, "Скрыть/Показать Люди",
@@ -416,7 +311,7 @@ class Module:
                                  not self.check_task_view_state())
 
     def _toggle_meet_now(self):
-        if not self.is_windows_version_supported():
+        if not self.is_windows_version_supported() and not logger.is_debug():
             return
         self._do_toggle_meet_now()
         self._update_button_text(self.toggle_meet_now_button,
@@ -431,110 +326,76 @@ class Module:
 
     # ---- actual registry operations ----
     def _do_toggle_weekday(self):
-        r = _run(['reg', 'query', 'HKCU\\Control Panel\\International',
-                  '/v', 'sShortDate'], capture_output=True, text=True, encoding='cp866')
-        value = 'dd.MM.yyyy' if "ddd" in r.stdout else 'ddd dd.MM.yyyy'
-        _run(['reg', 'add', 'HKCU\\Control Panel\\International',
-              '/V', 'sShortDate', '/D', value, '/T', 'REG_SZ', '/f'],
-             capture_output=True)
+        r = reg_utils.reg('query', 'HKCU\\Control Panel\\International',
+                          '/v', 'sShortDate', log=False)
+        value = 'dd.MM.yyyy' if "ddd" in (r.stdout or '') else 'ddd dd.MM.yyyy'
+        reg_utils.reg_add('HKCU\\Control Panel\\International', 'sShortDate',
+                          value, 'REG_SZ', module=MOD)
 
     def _do_toggle_notification_center(self):
         current = 1 if self.check_notification_center_state() else 0
+        key = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer'
         if current:
-            try:
-                _run(['reg', 'add',
-                      'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
-                      '/V', 'DisableNotificationCenter', '/D', '0',
-                      '/T', 'REG_DWORD', '/f'], capture_output=True, check=True)
-            except subprocess.CalledProcessError:
-                _run(['reg', 'delete',
-                      'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
-                      '/v', 'DisableNotificationCenter', '/f'], capture_output=True)
+            rr = reg_utils.reg_add(key, 'DisableNotificationCenter',
+                                   '0', 'REG_DWORD', module=MOD)
+            if rr.returncode != 0:
+                reg_utils.reg_delete(key, 'DisableNotificationCenter', module=MOD)
         else:
-            _run(['reg', 'add',
-                  'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
-                  '/V', 'DisableNotificationCenter', '/D', '1',
-                  '/T', 'REG_DWORD', '/f'], capture_output=True)
+            reg_utils.reg_add(key, 'DisableNotificationCenter',
+                              '1', 'REG_DWORD', module=MOD)
 
     def _do_toggle_taskbar_size(self):
         new = '0' if self.check_taskbar_size_state() else '1'
-        _run(['reg', 'add',
-              'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-              '/V', 'TaskbarSmallIcons', '/D', new, '/T', 'REG_DWORD', '/f'],
-             capture_output=True)
+        reg_utils.reg_add(
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            'TaskbarSmallIcons', new, 'REG_DWORD', module=MOD)
 
     def _do_toggle_search(self):
         current = self.check_search_state()
         new = {2: 1, 1: 0, 0: 2}[current]
-        _run(['reg', 'add',
-              'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search',
-              '/V', 'SearchboxTaskbarMode', '/D', str(new),
-              '/T', 'REG_DWORD', '/f'], capture_output=True)
+        reg_utils.reg_add(
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search',
+            'SearchboxTaskbarMode', str(new), 'REG_DWORD', module=MOD)
 
     def _do_toggle_people(self):
+        key = 'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer'
         if self.check_people_state():
-            try:
-                _run(['reg', 'delete',
-                      'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
-                      '/v', 'HidePeopleBar', '/f'], capture_output=True, check=True)
-            except subprocess.CalledProcessError:
-                _run(['reg', 'add',
-                      'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
-                      '/v', 'HidePeopleBar', '/d', '0', '/t', 'REG_DWORD', '/f'],
-                     capture_output=True)
+            rr = reg_utils.reg_delete(key, 'HidePeopleBar', module=MOD)
+            if rr.returncode != 0:
+                reg_utils.reg_add(key, 'HidePeopleBar', '0', 'REG_DWORD', module=MOD)
         else:
-            _run(['reg', 'add',
-                  'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
-                  '/v', 'HidePeopleBar', '/d', '1', '/t', 'REG_DWORD', '/f'],
-                 capture_output=True)
+            reg_utils.reg_add(key, 'HidePeopleBar', '1', 'REG_DWORD', module=MOD)
 
     def _do_toggle_task_view(self):
         new = '1' if self.check_task_view_state() else '0'
-        _run(['reg', 'add',
-              'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-              '/V', 'ShowTaskViewButton', '/D', new, '/T', 'REG_DWORD', '/f'],
-             capture_output=True)
+        reg_utils.reg_add(
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            'ShowTaskViewButton', new, 'REG_DWORD', module=MOD)
 
     def _do_toggle_meet_now(self):
+        key = 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer'
         if self.check_meet_now_state():
-            try:
-                _run(['reg', 'delete',
-                      'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
-                      '/v', 'HideSCAMeetNow', '/f'], capture_output=True, check=True)
-            except subprocess.CalledProcessError:
-                _run(['reg', 'add',
-                      'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
-                      '/v', 'HideSCAMeetNow', '/d', '0', '/t', 'REG_DWORD', '/f'],
-                     capture_output=True)
+            rr = reg_utils.reg_delete(key, 'HideSCAMeetNow', module=MOD)
+            if rr.returncode != 0:
+                reg_utils.reg_add(key, 'HideSCAMeetNow', '0', 'REG_DWORD', module=MOD)
         else:
-            _run(['reg', 'add',
-                  'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
-                  '/v', 'HideSCAMeetNow', '/d', '1', '/t', 'REG_DWORD', '/f'],
-                 capture_output=True)
+            reg_utils.reg_add(key, 'HideSCAMeetNow', '1', 'REG_DWORD', module=MOD)
 
     def _do_toggle_grouping(self):
         current = self.check_grouping_state()
         new = {0: 1, 1: 2, 2: 0}[current]
-        _run(['reg', 'add',
-              'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
-              '/V', 'TaskbarGlomLevel', '/D', str(new), '/T', 'REG_DWORD', '/f'],
-             capture_output=True)
+        reg_utils.reg_add(
+            'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
+            'TaskbarGlomLevel', str(new), 'REG_DWORD', module=MOD)
 
     def _restart_explorer(self):
-        try:
-            _run(['taskkill', '/f', '/im', 'explorer.exe'], capture_output=True)
-            time.sleep(1)
-            subprocess.Popen(['explorer.exe'], creationflags=CREATE_NO_WINDOW)
-        except Exception:
-            try:
-                subprocess.Popen(['explorer.exe'])
-            except Exception:
-                pass
+        win_utils.restart_explorer(MOD)
 
     def _reset_all(self):
         try:
             settings = [
-                ('HKCU\\Control Panel\\International', 'sShortDate', 'dd.MM.yyyy', 'REG_SZ'),
+                ('HKCU\\Control Panel\\International', 'sShortDate',
+                 'dd.MM.yyyy', 'REG_SZ'),
                 ('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced',
                  'TaskbarSmallIcons', '0', 'REG_DWORD'),
                 ('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Search',
@@ -546,22 +407,23 @@ class Module:
                 ('HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer',
                  'DisableNotificationCenter', '0', 'REG_DWORD'),
             ]
+            logger.log("reset all taskbar settings", module=MOD)
             for key, name, value, vtype in settings:
-                _run(['reg', 'add', key, '/V', name, '/D', value, '/T', vtype, '/f'],
-                     capture_output=True)
+                reg_utils.reg_add(key, name, value, vtype, module=MOD)
 
             if self.is_people_bar_supported():
-                _run(['reg', 'delete',
-                      'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
-                      '/v', 'HidePeopleBar', '/f'], capture_output=True)
+                reg_utils.reg_delete(
+                    'HKCU\\Software\\Policies\\Microsoft\\Windows\\Explorer',
+                    'HidePeopleBar', module=MOD)
             if self.is_windows_version_supported():
-                _run(['reg', 'delete',
-                      'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
-                      '/v', 'HideSCAMeetNow', '/f'], capture_output=True)
+                reg_utils.reg_delete(
+                    'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer',
+                    'HideSCAMeetNow', module=MOD)
 
             self._update_all_buttons()
             self._restart_explorer()
         except Exception as e:
+            logger.log(f"ERROR _reset_all: {e}", module=MOD)
             messagebox.showerror("Ошибка сброса настроек",
                                  f"Не удалось сбросить настройки\nОшибка: {e}")
 

@@ -1,20 +1,21 @@
 import os
-import platform
 import tkinter as tk
 import winreg
 from tkinter import ttk, messagebox
 
+import logger
+from core import reg_utils, win_utils
+from core.ui_utils import add_tooltip
+
 HKCR = winreg.HKEY_CLASSES_ROOT
 HKLM = winreg.HKEY_LOCAL_MACHINE
 HKCU = winreg.HKEY_CURRENT_USER
+MOD = "createnew"
 
 
 def _reg_exists(hive, path):
-    try:
-        with winreg.OpenKey(hive, path):
-            return True
-    except (FileNotFoundError, OSError):
-        return False
+    return reg_utils.key_exists(
+        'HKCU' if hive == HKCU else ('HKLM' if hive == HKLM else 'HKCR'), path)
 
 
 def _delete_key_recursive(hive, path):
@@ -70,30 +71,8 @@ def _ensure_shellnew(hive, base_path):
         winreg.SetValueEx(k, "NullFile", 0, winreg.REG_SZ, "")
 
 
-# ---------- Проверка версии Windows ----------
-
-_WIN_BUILD_CACHE = None
-
-
-def _get_windows_build():
-    try:
-        parts = platform.version().split('.')
-        if len(parts) >= 3:
-            return int(parts[2])
-    except Exception:
-        pass
-    return 0
-
-
-def _win_build():
-    global _WIN_BUILD_CACHE
-    if _WIN_BUILD_CACHE is None:
-        _WIN_BUILD_CACHE = _get_windows_build()
-    return _WIN_BUILD_CACHE
-
-
 def _is_windows_1903_or_later():
-    return _win_build() >= 18362
+    return win_utils.get_build_number() >= 18362
 
 
 FILE_NAMES = {
@@ -116,8 +95,6 @@ TARGET_EXTENSIONS = {
 
 HIDDEN_SINCE_1903 = {'.contact'}
 
-# ---------- Офисные клиенты ----------
-
 MS_EXTENSIONS = {
     '.docx': 'Документ Word',
     '.xlsx': 'Книга Excel',
@@ -133,23 +110,16 @@ MS_CLASSES = {
 }
 
 THIRD_PARTY_CLASS_HINTS = [
-    ('kwps', 'WPS Writer'),
-    ('wps.document', 'WPS Writer'),
-    ('ket.', 'WPS Spreadsheets'),
-    ('wps.sheet', 'WPS Spreadsheets'),
-    ('kwpp', 'WPS Presentation'),
-    ('wps.presentation', 'WPS Presentation'),
-    ('onlyoffice.document', 'OnlyOffice'),
-    ('onlyoffice.sheet', 'OnlyOffice'),
+    ('kwps', 'WPS Writer'), ('wps.document', 'WPS Writer'),
+    ('ket.', 'WPS Spreadsheets'), ('wps.sheet', 'WPS Spreadsheets'),
+    ('kwpp', 'WPS Presentation'), ('wps.presentation', 'WPS Presentation'),
+    ('onlyoffice.document', 'OnlyOffice'), ('onlyoffice.sheet', 'OnlyOffice'),
     ('onlyoffice.slide', 'OnlyOffice'),
-    ('libreoffice.writer', 'LibreOffice'),
-    ('libreoffice.calc', 'LibreOffice'),
+    ('libreoffice.writer', 'LibreOffice'), ('libreoffice.calc', 'LibreOffice'),
     ('libreoffice.impress', 'LibreOffice'),
-    ('openoffice.writer', 'OpenOffice'),
-    ('openoffice.calc', 'OpenOffice'),
+    ('openoffice.writer', 'OpenOffice'), ('openoffice.calc', 'OpenOffice'),
     ('openoffice.impress', 'OpenOffice'),
-    ('softmaker.textmaker', 'SoftMaker'),
-    ('softmaker.planmaker', 'SoftMaker'),
+    ('softmaker.textmaker', 'SoftMaker'), ('softmaker.planmaker', 'SoftMaker'),
     ('softmaker.presentations', 'SoftMaker'),
 ]
 
@@ -186,17 +156,14 @@ def _find_shellnew_under_ext(hive, ext):
 
 def _classify_provider(class_name, ext):
     low = class_name.lower()
-
     for base_cls in MS_CLASSES.get(ext, []):
         if low.startswith(base_cls.lower()):
             pid = base_cls.lower().split('.')[0] + '_' + ext.lstrip('.')
             return (pid, MS_EXTENSIONS[ext], '')
-
     for hint, vendor in THIRD_PARTY_CLASS_HINTS:
         if hint in low:
             pid = vendor.lower().replace(' ', '_') + '_' + ext.lstrip('.')
             return (pid, f"{MS_EXTENSIONS[ext]} ({vendor})", vendor)
-
     pid = 'unknown_' + ext.lstrip('.') + '_' + low.split('.')[-1]
     return (pid, f"{MS_EXTENSIONS[ext]} (другое)", 'other')
 
@@ -206,7 +173,6 @@ class CreateNewModule:
         self.parent = parent
         self.create_widgets()
 
-    # ---- UI ----
     def create_widgets(self):
         container = ttk.Frame(self.parent)
         container.pack(fill=tk.BOTH, expand=True)
@@ -281,11 +247,10 @@ class CreateNewModule:
                    command=lambda i=item: self.toggle_item(i)).pack(
             side=tk.LEFT, padx=5, pady=5)
 
-    # ---- items discovery ----
     def _get_items(self):
         items = []
         try:
-            hidden_1903 = _is_windows_1903_or_later()
+            hidden_1903 = _is_windows_1903_or_later() and not logger.is_debug()
 
             if _reg_exists(HKCR, r'Folder\ShellNew'):
                 items.append({"name": "Папка", "enabled": True,
@@ -300,7 +265,6 @@ class CreateNewModule:
             for ext, path in TARGET_EXTENSIONS.items():
                 if hidden_1903 and ext in HIDDEN_SINCE_1903:
                     continue
-
                 name = FILE_NAMES.get(ext, f"Файл {ext.lstrip('.')}")
                 if _reg_exists(HKLM, path):
                     items.append({"name": name, "enabled": True,
@@ -314,13 +278,12 @@ class CreateNewModule:
 
             items.extend(self._get_office_items())
         except Exception as e:
-            print(f"Ошибка: {e}")
+            logger.log(f"ERROR _get_items: {e}", module=MOD)
         return items
 
     def _get_office_items(self):
         items = []
         seen = set()
-
         for ext in MS_EXTENSIONS:
             if not _ext_registered(ext):
                 continue
@@ -340,13 +303,13 @@ class CreateNewModule:
                     })
         return items
 
-    # ---- actions ----
     def toggle_all_items(self):
         try:
             items = self._get_items()
             if not items:
                 return
             all_disabled = all(not it["enabled"] for it in items)
+            logger.log(f"toggle all (enable={all_disabled})", module=MOD)
             for item in items:
                 if all_disabled and not item["enabled"]:
                     self._enable(item)
@@ -354,16 +317,19 @@ class CreateNewModule:
                     self._disable(item)
             self.refresh()
         except Exception as e:
+            logger.log(f"ERROR toggle_all_items: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Ошибка при переключении пунктов: {e}")
 
     def toggle_item(self, item):
         try:
+            logger.log(f"toggle '{item['name']}' (was {item['enabled']})", module=MOD)
             if item["enabled"]:
                 self._disable(item)
             else:
                 self._enable(item)
             self.refresh()
         except Exception as e:
+            logger.log(f"ERROR toggle_item: {e}", module=MOD)
             messagebox.showerror("Ошибка", f"Ошибка при переключении: {e}")
 
     def _enable(self, item):
@@ -372,8 +338,8 @@ class CreateNewModule:
             hive, path = shellnew
             try:
                 if path.endswith('_no'):
+                    logger.log_reg(MOD, "rename", path, None, path[:-3])
                     _rename_key(hive, path, path[:-3])
-                    # Проверяем, что переименование действительно сработало
                     if not _reg_exists(hive, path[:-3]):
                         messagebox.showwarning(
                             "Не удалось",
@@ -383,12 +349,14 @@ class CreateNewModule:
                 elif not _reg_exists(hive, path):
                     _ensure_shellnew(hive, os.path.dirname(path))
             except Exception as e:
+                logger.log(f"ERROR _enable {item['name']}: {e}", module=MOD)
                 messagebox.showwarning(
                     "Ошибка", f"Не удалось включить {item['name']}: {e}")
             return
         hive, base = item["hive"], item["base_path"]
         try:
             if _reg_exists(hive, base + '_no'):
+                logger.log_reg(MOD, "rename", base + '_no', None, base)
                 _rename_key(hive, base + '_no', base)
                 if not _reg_exists(hive, base):
                     messagebox.showwarning(
@@ -399,6 +367,7 @@ class CreateNewModule:
             elif not _reg_exists(hive, base):
                 _ensure_shellnew(hive, base)
         except Exception as e:
+            logger.log(f"ERROR _enable {item['name']}: {e}", module=MOD)
             messagebox.showwarning(
                 "Ошибка", f"Не удалось включить {item['name']}: {e}")
 
@@ -408,6 +377,7 @@ class CreateNewModule:
             hive, path = shellnew
             try:
                 if not path.endswith('_no') and _reg_exists(hive, path):
+                    logger.log_reg(MOD, "rename", path, None, path + '_no')
                     _rename_key(hive, path, path + '_no')
                     if _reg_exists(hive, path):
                         messagebox.showwarning(
@@ -416,12 +386,14 @@ class CreateNewModule:
                             f"Запустите программу от имени администратора."
                         )
             except Exception as e:
+                logger.log(f"ERROR _disable {item['name']}: {e}", module=MOD)
                 messagebox.showwarning(
                     "Ошибка", f"Не удалось отключить {item['name']}: {e}")
             return
         hive, base = item["hive"], item["base_path"]
         try:
             if _reg_exists(hive, base):
+                logger.log_reg(MOD, "rename", base, None, base + '_no')
                 _rename_key(hive, base, base + '_no')
                 if _reg_exists(hive, base):
                     messagebox.showwarning(
@@ -430,5 +402,6 @@ class CreateNewModule:
                         f"Запустите программу от имени администратора."
                     )
         except Exception as e:
+            logger.log(f"ERROR _disable {item['name']}: {e}", module=MOD)
             messagebox.showwarning(
                 "Ошибка", f"Не удалось отключить {item['name']}: {e}")
